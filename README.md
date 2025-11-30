@@ -1,2 +1,7 @@
-# DELTA
-This is a project, based on the DELTA robot upper computer system of P
+# 成功适配p副的仿真
+
+修改p副的解算
+
+视觉仍然不行
+
+仿真适配曲线,点动,电机运动等多种

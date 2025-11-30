@@ -1,0 +1,6 @@
+<RCC>
+  <qresource prefix="Whalze">
+    <file>../images/福州大学logo(红).jpg</file>
+    <file>../images/Whaltze2.jpg</file>
+  </qresource>
+</RCC>
