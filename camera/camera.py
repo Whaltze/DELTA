@@ -22,7 +22,7 @@ class Camera(QThread):
 
     def __init__(self):
         super().__init__()
-        self.cam_number = 0
+        # self.cam_number = 0
         self.is_running = False
         self.video_capture = None
         
