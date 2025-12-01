@@ -65,13 +65,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.populate_camera_list()
         self.connect_signals()
         
-        self.log_terminal("系统全功能就绪 (修复版)")
+        self.log_terminal("系统全功能就绪")
 
     def connect_signals(self):
         # 摄像头
         self.ui.cameraButton1.clicked.connect(self.init_camera)
         self.ui.cameraButton2.clicked.connect(self.close_camera)
-        self.ui.apply_transform_button.clicked.connect(self.apply_calibration_matrix)
+        # self.ui.apply_transform_button.clicked.connect(self.apply_calibration_matrix)
+        self.ui.apply_transform_button.clicked.connect(self.calib_handler.apply_hand_eye_transform)
+
 
         # 写字
         self.ui.preview_button.clicked.connect(self.writing_func.preview_writing_trajectory)
@@ -114,15 +116,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ui.run_jog_sequence_button.clicked.connect(self.traj_executor.run_jog_sequence)
         self.ui.open_simulator_button.clicked.connect(self.show_simulator)
 
-    def apply_calibration_matrix(self):
-        """应用手眼标定矩阵"""
-        try:
-            x, y, z = self.ui.trans_x.value(), self.ui.trans_y.value(), self.ui.trans_z.value()
-            r, p, yw = self.ui.trans_r.value(), self.ui.trans_p.value(), self.ui.trans_y_2.value()
-            self.camera_thread.set_transform_matrix(x, y, z, r, p, yw)
-            self.log_terminal("已应用标定矩阵")
-        except Exception as e:
-            self.log_terminal(f"标定参数错误: {e}")
+    # def apply_calibration_matrix(self):
+    #     """应用手眼标定矩阵"""
+    #     try:
+    #         x, y, z = self.ui.trans_x.value(), self.ui.trans_y.value(), self.ui.trans_z.value()
+    #         r, p, yw = self.ui.trans_r.value(), self.ui.trans_p.value(), self.ui.trans_y_2.value()
+    #         self.camera_thread.set_transform_matrix(x, y, z, r, p, yw)
+    #         self.log_terminal("已应用标定矩阵")
+    #     except Exception as e:
+    #         self.log_terminal(f"标定参数错误: {e}")
 
     # ================= 核心修复：寸动与电机调试 =================
     def handle_inch_move(self, axis_idx, delta):
@@ -254,9 +256,15 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def close_camera(self):
         self.camera_thread.stop()
+        
+        self.ui.cameraview.clear()
+        self.ui.cameraview.setStyleSheet("background-color: rgb(0, 0, 0);\n"
+                                "border-image: url(:/Whalze/images/福州大学logo(红).jpg);\n")
+        
+        self.ui.cameraview.update()
         self.ui.cameraButton1.setText("打开摄像头")
         self.ui.cameraButton1.setEnabled(True)
-        self.ui.cameraButton2.setEnabled(False)
+        # self.ui.cameraButton2.setEnabled(False)
 
     def receive_frame(self, img):
         if not img.isNull():
@@ -264,6 +272,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def clear_writing_canvas(self):
         self.writing_canvas.clear_handwriting()
+        self.writing_canvas.set_trajectory([])
         self.writing_func.clear_state()
         self.log_terminal("画布清除")
 
@@ -282,4 +291,5 @@ if __name__ == "__main__":
     Background_rc.qInitResources()
     main_window = MainWindow()
     main_window.show()
-    sys.exit(app.exec())
+
+    sys.exit(app.exec()) #  执行应用程序并退出

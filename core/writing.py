@@ -24,26 +24,93 @@ class WritingFunctionality:
             self.simulator.set_trajectory([])
         self.ui.writing_status.setText("状态: 画布已清空")
 
-    def text_to_trajectory(self, text, font_size=30, area_size=150, z_height=-280):
-        # 简化的文本生成逻辑 (字符 F)
+    def text_to_trajectory(self, text, font_size=45, area_size=150, z_height=-280):
+        # 优化策略：FZU专用逻辑 + 垂直提笔(消除拖尾) + 倒角美化
         trajectory = []
         z_up = z_height + 20
-        start_x = -len(text) * font_size / 2
+        
+        # 字符几何参数
+        char_w = font_size * 0.7       # 字体宽度比例
+        bevel = font_size * 0.2        # U字的倒角大小
+        char_spacing = font_size * 0.3 # 字符间距
+        
+        # --- 居中计算 ---
+        total_width = len(text) * char_w + (len(text) - 1) * char_spacing
+        start_x = -total_width / 2
+        start_y = -font_size / 2
         
         for i, char in enumerate(text):
-            current_x = start_x + i * (font_size + 10)
-            current_y = 0
-            # 提笔移动
-            trajectory.append((current_x, current_y, z_up, False))
-            # 下笔
-            trajectory.append((current_x, current_y, z_height, True))
-            trajectory.append((current_x, current_y + font_size, z_height, True))
-            trajectory.append((current_x + font_size*0.6, current_y + font_size, z_height, True))
-            # 简单的笔画
-            trajectory.append((current_x, current_y + font_size*0.5, z_height, True))
-            trajectory.append((current_x + font_size*0.5, current_y + font_size*0.5, z_height, True))
-            # 提笔
-            trajectory.append((current_x + font_size, current_y, z_up, False))
+            # 当前字符左下角基准点
+            curr_x = start_x + i * (char_w + char_spacing)
+            curr_y = start_y
+            
+            # --- 辅助函数：添加一段笔画 ---
+            # 逻辑：先移动到起点上方 -> 下笔 -> 画路径 -> 原地提笔
+            def draw_stroke(points):
+                if not points: return
+                # 1. 提笔移至起点上方
+                sx, sy = points[0]
+                trajectory.append((sx, sy, z_up, False))
+                # 2. 下笔
+                trajectory.append((sx, sy, z_height, True))
+                # 3. 绘制路径
+                for px, py in points[1:]:
+                    trajectory.append((px, py, z_height, True))
+                # 4. 原地垂直提笔 (关键：修复仿真拖尾)
+                ex, ey = points[-1]
+                trajectory.append((ex, ey, z_up, False))
+
+            if char == 'F':
+                # 第一笔：左竖 + 顶横 (连写)
+                # 从左下 -> 左上 -> 右上
+                stroke1 = [
+                    (curr_x, curr_y),
+                    (curr_x, curr_y + font_size),
+                    (curr_x + char_w, curr_y + font_size)
+                ]
+                draw_stroke(stroke1)
+                
+                # 第二笔：中横 (短一点，位置偏上)
+                # 从中左 -> 中右
+                mid_y = curr_y + font_size * 0.55
+                stroke2 = [
+                    (curr_x, mid_y),
+                    (curr_x + char_w * 0.6, mid_y)
+                ]
+                draw_stroke(stroke2)
+
+            elif char == 'Z':
+                # 一笔画：左上 -> 右上 -> 左下 -> 右下
+                stroke = [
+                    (curr_x, curr_y + font_size),          # 起点：左上
+                    (curr_x + char_w, curr_y + font_size), # 顶横
+                    (curr_x, curr_y),                      # 斜线
+                    (curr_x + char_w, curr_y)              # 底横
+                ]
+                draw_stroke(stroke)
+
+            elif char == 'U':
+                # 倒角 U：左上 -> 左下倒角 -> 底横 -> 右下倒角 -> 右上
+                stroke = [
+                    (curr_x, curr_y + font_size),          # 起点：左上
+                    (curr_x, curr_y + bevel),              # 左竖 (停在倒角前)
+                    (curr_x + bevel, curr_y),              # 左下倒角 (斜切)
+                    (curr_x + char_w - bevel, curr_y),     # 底部横线
+                    (curr_x + char_w, curr_y + bevel),     # 右下倒角 (斜切)
+                    (curr_x + char_w, curr_y + font_size)  # 右竖
+                ]
+                draw_stroke(stroke)
+                
+            else:
+                # 默认方框
+                stroke = [
+                    (curr_x, curr_y),
+                    (curr_x, curr_y + font_size),
+                    (curr_x + char_w, curr_y + font_size),
+                    (curr_x + char_w, curr_y),
+                    (curr_x, curr_y)
+                ]
+                draw_stroke(stroke)
             
         return trajectory
 
