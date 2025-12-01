@@ -1,18 +1,14 @@
 # -*- coding: utf-8 -*-
-"""
-写字功能模块：封装和 UI 交互、轨迹生成、写字执行等相关。
-"""
+# core/writing.py
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QMessageBox
-from PySide6.QtGui import QPixmap
-import time
 
 class WritingFunctionality:
-    def __init__(self, ui, serial_com, writing_canvas, logger=None):
+    def __init__(self, ui, serial_com, writing_canvas, logger=None, simulator=None):
         self.ui = ui
         self.serial_com = serial_com
         self.writing_canvas = writing_canvas
-        self.logger = logger or self.log_terminal
+        self.logger = logger or print
+        self.simulator = simulator
 
         self.writing_mode = 'idle'
         self.writing_trajectory = []
@@ -20,151 +16,133 @@ class WritingFunctionality:
         self.writing_timer = QTimer()
         self.writing_timer.timeout.connect(self.send_next_writing_point)
 
-    def log_terminal(self, msg):
-        print(msg)
-
-    def use_handwriting_trajectory(self):
-        handwriting_trajectory = self.writing_canvas.get_handwriting_trajectory(
-            z_height=self.ui.z_height.value(),
-            area_size=self.ui.writing_area.value()
-        )
-        if not handwriting_trajectory:
-            self.logger("警告: 未检测到手写轨迹，请先在画布上书写")
-            return False
-        self.writing_trajectory = handwriting_trajectory
-        self.writing_canvas.set_trajectory(self.writing_trajectory)
-        self.logger(f"手写轨迹已转换，共{len(self.writing_trajectory)}个点")
-        return True
+    def clear_state(self):
+        self.writing_trajectory = []
+        self.current_writing_index = 0
+        if self.simulator:
+            # 这里传空列表给仿真器，仿真器已修复处理空列表的逻辑
+            self.simulator.set_trajectory([])
+        self.ui.writing_status.setText("状态: 画布已清空")
 
     def text_to_trajectory(self, text, font_size=30, area_size=150, z_height=-280):
+        # 简化的文本生成逻辑 (字符 F)
         trajectory = []
-        char_spacing = font_size * 0.8
-        start_x = -area_size / 2
-        start_y = 0
-        current_x = start_x
-        current_y = start_y
-        trajectory.append((current_x, current_y, z_height + 10, False))
-        for char in text:
-            if char.upper() == 'F':
-                points = [
-                    (current_x, current_y + font_size, z_height, True),
-                    (current_x, current_y, z_height, True),
-                    (current_x, current_y + font_size, z_height, True),
-                    (current_x + font_size * 0.6, current_y + font_size, z_height, True),
-                    (current_x, current_y + font_size * 0.5, z_height, True),
-                    (current_x + font_size * 0.4, current_y + font_size * 0.5, z_height, True),
-                ]
-                trajectory.extend(points)
-                trajectory.append((current_x + char_spacing * 0.8, current_y, z_height + 10, False))
-                current_x += char_spacing
-            elif char.upper() == 'Z':
-                points = [
-                    (current_x, current_y + font_size, z_height, True),
-                    (current_x + font_size * 0.8, current_y + font_size, z_height, True),
-                    (current_x, current_y, z_height, True),
-                    (current_x + font_size * 0.8, current_y, z_height, True),
-                ]
-                trajectory.extend(points)
-                trajectory.append((current_x + char_spacing, current_y, z_height + 10, False))
-                current_x += char_spacing
-            elif char.upper() == 'U':
-                points = [
-                    (current_x, current_y + font_size, z_height, True),
-                    (current_x, current_y + font_size * 0.2, z_height, True),
-                    (current_x + font_size * 0.2, current_y, z_height, True),
-                    (current_x + font_size * 0.6, current_y, z_height, True),
-                    (current_x + font_size * 0.8, current_y + font_size * 0.2, z_height, True),
-                    (current_x + font_size * 0.8, current_y + font_size, z_height, True),
-                ]
-                trajectory.extend(points)
-                trajectory.append((current_x + char_spacing, current_y + font_size, z_height + 10, False))
-                current_x += char_spacing
-            else:
-                points = [
-                    (current_x, current_y, z_height, True),
-                    (current_x + font_size * 0.8, current_y, z_height, True),
-                    (current_x + font_size * 0.8, current_y + font_size, z_height, True),
-                    (current_x, current_y + font_size, z_height, True),
-                    (current_x, current_y, z_height, True),
-                ]
-                trajectory.extend(points)
-                trajectory.append((current_x + char_spacing, current_y, z_height + 10, False))
-                current_x += char_spacing
+        z_up = z_height + 20
+        start_x = -len(text) * font_size / 2
+        
+        for i, char in enumerate(text):
+            current_x = start_x + i * (font_size + 10)
+            current_y = 0
+            # 提笔移动
+            trajectory.append((current_x, current_y, z_up, False))
+            # 下笔
+            trajectory.append((current_x, current_y, z_height, True))
+            trajectory.append((current_x, current_y + font_size, z_height, True))
+            trajectory.append((current_x + font_size*0.6, current_y + font_size, z_height, True))
+            # 简单的笔画
+            trajectory.append((current_x, current_y + font_size*0.5, z_height, True))
+            trajectory.append((current_x + font_size*0.5, current_y + font_size*0.5, z_height, True))
+            # 提笔
+            trajectory.append((current_x + font_size, current_y, z_up, False))
+            
         return trajectory
+
+    def use_handwriting_trajectory(self):
+        # [核心修复] 必须在此处动态获取 UI 的高度值
+        z_write = self.ui.z_height.value()
+        z_safe = z_write + 20.0
+        area_size = self.ui.writing_area.value()
+        
+        raw_points = self.writing_canvas.handwriting_points
+        if not raw_points:
+            self.logger("警告: 画布为空")
+            return False
+
+        trajectory = []
+        w = self.writing_canvas.width()
+        h = self.writing_canvas.height()
+        
+        # 转换坐标并应用 Z 高度
+        for i, p in enumerate(raw_points):
+            if hasattr(p, 'x'): px, py = p.x(), p.y()
+            else: px, py = p[0], p[1]
+            
+            # 映射到物理尺寸，注意 Y 轴反转
+            real_x = (px / w - 0.5) * area_size
+            real_y = -(py / h - 0.5) * area_size
+            
+            if i == 0:
+                trajectory.append((real_x, real_y, z_safe, False))
+            
+            trajectory.append((real_x, real_y, z_write, True))
+            
+        # 最后提笔
+        if trajectory:
+            last = trajectory[-1]
+            trajectory.append((last[0], last[1], z_safe, False))
+
+        self.writing_trajectory = trajectory
+        
+        if self.simulator:
+            # 同步到仿真
+            sim_traj = [[p[0], p[1], p[2]] for p in self.writing_trajectory]
+            self.simulator.set_trajectory(sim_traj)
+            
+        self.logger(f"手写轨迹已生成，写字高度: {z_write}")
+        return True
 
     def preview_writing_trajectory(self):
         try:
-            if self.ui.input_method.currentText() == "文本输入":
+            self.writing_trajectory = []
+            mode = self.ui.input_method.currentText()
+            z_val = self.ui.z_height.value()
+            area_val = self.ui.writing_area.value()
+
+            if mode == "文本输入":
                 text = self.ui.text_input.text()
-                if not text:
-                    self.logger("错误: 请输入要写的文字")
-                    return
-                font_size = self.ui.font_size.value()
-                area_size = self.ui.writing_area.value()
-                z_height = self.ui.z_height.value()
-                self.writing_trajectory = self.text_to_trajectory(text, font_size, area_size, z_height)
-                self.logger(f"文本轨迹生成完成: '{text}', 共{len(self.writing_trajectory)}个点")
-            else:
-                if not self.writing_canvas.handwriting_points:
-                    self.logger("错误: 请先在画布上手写文字")
-                    return
-                self.use_handwriting_trajectory()
-            self.writing_canvas.set_trajectory(self.writing_trajectory)
-            self.ui.writing_status.setText("状态: 轨迹预览完成")
+                if not text: return
+                font_val = self.ui.font_size.value()
+                self.writing_trajectory = self.text_to_trajectory(text, font_val, area_val, z_val)
+            elif mode == "手写输入":
+                if not self.use_handwriting_trajectory(): return
+
+            if self.writing_trajectory:
+                self.writing_canvas.set_trajectory(self.writing_trajectory)
+                # 再次确保仿真同步
+                if self.simulator:
+                    sim_pts = [[p[0], p[1], p[2]] for p in self.writing_trajectory]
+                    self.simulator.set_trajectory(sim_pts)
+                self.ui.writing_status.setText(f"状态: {mode}轨迹生成完成")
+                
         except Exception as e:
-            self.logger(f"轨迹生成错误: {str(e)}")
-            self.ui.writing_status.setText("状态: 轨迹生成错误")
+            self.logger(f"轨迹错误: {e}")
 
     def start_writing(self):
-        if not self.serial_com.is_connected:
-            self.logger("错误: 请先连接串口")
-            return
-        if not self.writing_trajectory:
-            self.logger("错误: 请先生成轨迹预览")
-            return
-        if self.writing_timer.isActive():
-            self.logger("警告: 写字任务正在进行中")
-            return
+        if not self.writing_trajectory: return
         self.writing_mode = 'writing'
         self.current_writing_index = 0
-        self.ui.writing_status.setText("状态: 写字进行中...")
-        self.logger("开始执行写字任务")
         speed = self.ui.writing_speed.value()
-        interval = max(50, 200 - speed * 15)
+        interval = int(200 - (speed - 1) * 15)
         self.writing_timer.start(interval)
 
     def stop_writing(self):
         self.writing_timer.stop()
         self.writing_mode = 'idle'
-        self.ui.writing_status.setText("状态: 已停止")
-        self.logger("写字任务已停止")
-        self.writing_canvas.set_current_point(-1)
-        if self.writing_trajectory and self.current_writing_index < len(self.writing_trajectory):
-            last_point = self.writing_trajectory[self.current_writing_index - 1] if self.current_writing_index > 0 else self.writing_trajectory[0]
-            x, y, z, pen_down = last_point
-            self.serial_com.send_packet(
-                command=self.serial_com.CMD_JOG,
-                x=x, y=y, z=z + 10,
-                speed=self.ui.writing_speed.value()
-            )
+        self.ui.writing_status.setText("状态: 写字完成")
 
     def send_next_writing_point(self):
         if self.current_writing_index < len(self.writing_trajectory):
             point = self.writing_trajectory[self.current_writing_index]
-            x, y, z, pen_down = point
-            speed = self.ui.writing_speed.value()
-            self.serial_com.send_packet(
-                command=self.serial_com.CMD_JOG,
-                x=x, y=y, z=z,
-                speed=speed
-            )
+            x, y, z, _ = point
+            
+            # 发送硬件指令
+            self.serial_com.send_packet(command=self.serial_com.CMD_JOG, x=x, y=y, z=z)
+            
+            # 发送仿真指令
+            if self.simulator and self.ui.simulator_enable_checkbox.isChecked():
+                self.simulator.update_robot_state([x, y, z])
+                
             self.writing_canvas.set_current_point(self.current_writing_index)
-            progress = (self.current_writing_index + 1) / len(self.writing_trajectory) * 100
-            self.ui.writing_status.setText(f"状态: 写字中... {progress:.1f}%")
             self.current_writing_index += 1
         else:
-            self.writing_timer.stop()
-            self.writing_mode = 'idle'
-            self.ui.writing_status.setText("状态: 写字完成")
-            self.logger("写字任务完成")
-            self.writing_canvas.set_current_point(-1)
+            self.stop_writing()

@@ -14,7 +14,6 @@ class WritingCanvas(QtWidgets.QLabel):
         self.last_point = None
         self.setMinimumSize(340, 245)  # 增加画布尺寸
         self.setMouseTracking(True)
-               # 样式设置
         self.setStyleSheet("background-color: white; border: 1px solid gray;")
 
     def get_handwriting_trajectory(self, z_height=-280, area_size=150, flip_vertical=True):
