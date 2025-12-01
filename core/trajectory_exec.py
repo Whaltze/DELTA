@@ -3,11 +3,17 @@
 轨迹调度和执行模块
 """
 from PySide6.QtCore import QTimer
+
+from visualization.visualizer import TrajectoryVisualizer
+from kinematics.trajectory import TrajectoryPlanner
 import numpy as np
 
 class TrajectoryExecution:
     def __init__(self, ui, serial_com, kinematics, planner, visualizer, logger=None, simulator=None):
         self.ui = ui
+
+        self.visualizer = TrajectoryVisualizer()
+        self.planner = TrajectoryPlanner()
         self.serial_com = serial_com
         self.kinematics = kinematics
         self.planner = planner
