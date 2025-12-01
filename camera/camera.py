@@ -22,7 +22,7 @@ class Camera(QThread):
 
     def __init__(self):
         super().__init__()
-        # self.cam_number = 0
+        self.cam_number = 0
         self.is_running = False
         self.video_capture = None
         
@@ -37,6 +37,7 @@ class Camera(QThread):
 
     def set_cam_number(self, num):
         """设置要使用的摄像头编号"""
+        print(f"[Camera] 设置摄像头编号: {num} (类型: {type(num)})")
         self.cam_number = num
 
     @staticmethod
@@ -230,26 +231,36 @@ class Camera(QThread):
         return frame
     def run(self):
         """线程的主循环：捕获、处理并发送图像帧"""
-        print(f"尝试打开摄像头: {self.cam_number}")
-        
+        print(f"[Camera] 开始运行，使用摄像头编号: {self.cam_number}")
+
+        # 确保cam_number已正确设置
+        if not hasattr(self, 'cam_number') or self.cam_number is None:
+            print("[Camera] 警告: cam_number未设置，使用默认值0")
+            self.cam_number = 0
+
         # 尝试不同的API
         cap = None
         for api in [cv2.CAP_V4L2, cv2.CAP_ANY]:
             try:
-                if isinstance(self.cam_number, int):
-                    cap = cv2.VideoCapture(self.cam_number, api)
-                else:  # 字符串路径
-                    cap = cv2.VideoCapture(self.cam_number, api)
-                    
+                print(f"[Camera] 尝试使用API {api} 打开摄像头 {self.cam_number}")
+                cap = cv2.VideoCapture(self.cam_number, api)
+
                 if cap.isOpened():
-                    print(f"使用API {api} 成功打开摄像头")
+                    print(f"[Camera] 使用API {api} 成功打开摄像头 {self.cam_number}")
                     break
-            except:
+                else:
+                    cap.release()
+            except Exception as e:
+                print(f"[Camera] 使用API {api} 打开摄像头失败: {e}")
                 continue
-        
+
         if cap is None or not cap.isOpened():
-            print(f"错误：无法打开摄像头 {self.cam_number}")
-            return
+            print(f"[Camera] 错误：无法打开摄像头 {self.cam_number}，尝试使用默认摄像头")
+            # 最后一次尝试使用默认方式
+            cap = cv2.VideoCapture(self.cam_number)
+            if not cap.isOpened():
+                print(f"[Camera] 最终无法打开摄像头 {self.cam_number}")
+                return
         
         # 设置分辨率
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)

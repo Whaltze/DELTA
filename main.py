@@ -31,7 +31,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ui.setupUi(self)
 
         # 1. 硬件与基础组件
-        self.camera_thread = Camera()
+        self.camera_thread = None
         self.serial_com = SerialCommunication(self.ui)
 
         # 2. 算法初始化 (Linear Delta / P副)
@@ -91,9 +91,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ui.pushButton_4.clicked.connect(self.vision_func.start_visual_sorting)
         self.ui.pushButton_5.clicked.connect(self.vision_func.start_visual_picking)
         self.vision_func.object_detected.connect(self.vision_func.handle_object_detection)
-        self.vision_func.execute_picking_sequence_signal.connect(self.vision_func.execute_picking_sequence)
-        self.camera_thread.object_detected_robot_coords.connect(self.vision_func.handle_object_detection)
+        # self.vision_func.execute_picking_sequence_signal.connect(self.vision_func.execute_picking_sequence)
+        # self.camera_thread.object_detected_robot_coords.connect(self.vision_func.handle_object_detection)
 
+        self.ui.camera_selector.currentIndexChanged.connect(self.on_camera_selection_changed)
         # --- 轨迹控制 ---
         self.ui.run_jog_sequence_button.clicked.connect(self.traj_executor.run_jog_sequence)
         self.ui.pushButton_6.clicked.connect(self.traj_executor.run_curve)
@@ -238,49 +239,141 @@ class MainWindow(QtWidgets.QMainWindow):
         self.writing_func.writing_canvas = self.writing_canvas
 
     def populate_camera_list(self):
-        self.ui.camera_selector.clear()
-        available_cameras = Camera.scan_cameras()
-        if not available_cameras:
-            self.ui.camera_selector.addItem("未检测到摄像头")
-            self.ui.camera_selector.setEnabled(False)
-            self.ui.cameraButton1.setEnabled(False)
-        else:
-            for idx, name in available_cameras:
-                self.ui.camera_selector.addItem(f"Cam {idx}", userData=idx)
-            self.ui.camera_selector.setEnabled(True)
-            self.ui.cameraButton1.setEnabled(True)
+        """扫描并填充可用摄像头列表"""
+        try:
+            self.ui.camera_selector.clear()
+            available_cameras = Camera.scan_cameras()
+            
+            if not available_cameras:
+                self.ui.camera_selector.addItem("未检测到摄像头")
+                self.ui.camera_selector.setEnabled(False)
+                self.ui.cameraButton1.setEnabled(False)
+                self.log_terminal("未检测到可用摄像头")
+            else:
+                for idx, name in available_cameras:
+                    display_name = f"{name} (ID: {idx})"
+                    self.ui.camera_selector.addItem(display_name, userData=idx)
+                
+                self.ui.camera_selector.setEnabled(True)
+                self.ui.cameraButton1.setEnabled(True)
+                
+                # 默认选择第一个摄像头
+                if available_cameras:
+                    self.ui.camera_selector.setCurrentIndex(0)
+                    
+                camera_list = ", ".join([f"{name}(ID:{idx})" for idx, name in available_cameras])
+                self.log_terminal(f"检测到摄像头: {camera_list}")
+                
+        except Exception as e:
+            self.log_terminal(f"扫描摄像头时出错: {e}")
 
     def init_camera(self):
-        self.populate_camera_list()
-        selected_index = self.ui.camera_selector.currentData()
-        if selected_index is None: return
-        self.camera_thread = Camera()
-        self.camera_thread.set_cam_number(selected_index)
-        self.camera_thread.sendPicture.connect(self.receive_frame)
-        self.camera_thread.start()
-        self.ui.cameraButton1.setText("采集中")
-        self.ui.cameraButton2.setEnabled(True)
+        """初始化并打开选中的摄像头"""
+        try:
+            # 获取选中的摄像头编号
+            selected_index = self.ui.camera_selector.currentData()
+            if selected_index is None:
+                self.log_terminal("错误: 未选择有效的摄像头")
+                return
+
+            print(f"用户选择的摄像头编号: {selected_index}")
+
+            # 如果摄像头线程已存在，先关闭
+            if self.camera_thread and self.camera_thread.isRunning():
+                self.close_camera()
+
+            # 创建新的摄像头实例
+            self.camera_thread = Camera()
+
+            # 关键步骤：设置摄像头编号
+            self.camera_thread.set_cam_number(selected_index)
+            print(f"已设置摄像头编号: {selected_index}")
+
+            # 连接信号
+            self.camera_thread.sendPicture.connect(self.receive_frame)
+            self.camera_thread.object_detected_robot_coords.connect(self.vision_func.handle_object_detection)           
+                # 启动摄像头线程
+            self.camera_thread.start()
+            
+            # 更新UI状态
+            self.ui.cameraButton1.setEnabled(False)
+            self.ui.cameraButton2.setEnabled(True)
+            self.ui.cameraButton1.setText("采集中...")
+            
+            self.log_terminal(f"正在打开摄像头 {selected_index}...")
+            
+        except Exception as e:
+            self.log_terminal(f"打开摄像头时出错: {str(e)}")
+            import traceback
+            traceback.print_exc()
 
     def close_camera(self):
-        if self.camera_thread and self.camera_thread.isRunning():
-            self.camera_thread.stop()
-            self.camera_thread.wait()
-        self.ui.cameraview.clear()
-        self.ui.cameraButton1.setText("打开摄像头")
+        """关闭摄像头"""
+        try:
+            if self.camera_thread and self.camera_thread.isRunning():
+                print("正在关闭摄像头线程...")
+                self.camera_thread.stop()
+                if not self.camera_thread.wait(2000):  # 等待2秒
+                    print("摄像头线程未正常退出，强制终止")
+                    self.camera_thread.terminate()
+                    self.camera_thread.wait()
+                    
+            # 更新UI状态
+            self.ui.cameraview.clear()
+            self.ui.cameraButton1.setEnabled(True)
+            self.ui.cameraButton2.setEnabled(False)
+            self.ui.cameraButton1.setText("打开摄像头")
+            
+            self.log_terminal("摄像头已关闭")
+            
+        except Exception as e:
+            self.log_terminal(f"关闭摄像头时出错: {str(e)}")
 
     def receive_frame(self, img):
-        if img.isNull(): return
-        scaled_img = img.scaled(self.ui.cameraview.size(), QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation)
-        self.ui.cameraview.setPixmap(QtGui.QPixmap.fromImage(scaled_img))
+        """接收并显示图像帧"""
+        if img.isNull():
+            return
+            
+        try:
+            # 缩放图像以适应显示区域
+            scaled_img = img.scaled(
+                self.ui.cameraview.size(), 
+                QtCore.Qt.KeepAspectRatio, 
+                QtCore.Qt.SmoothTransformation
+            )
+            self.ui.cameraview.setPixmap(QtGui.QPixmap.fromImage(scaled_img))
+        except Exception as e:
+            print(f"显示图像时出错: {e}")
+
+    def refresh_camera_list(self):
+        """刷新摄像头列表（可以绑定到刷新按钮）"""
+        self.populate_camera_list()
+        self.log_terminal("摄像头列表已刷新")
+
+    def on_camera_selection_changed(self, index):
+        """当摄像头选择改变时的调试信息"""
+        selected_index = self.ui.camera_selector.currentData()
+        print(f"摄像头选择已改变: 索引={index}, 摄像头ID={selected_index}")
 
     def clear_writing_canvas(self):
         self.writing_canvas.clear_handwriting()
         self.writing_canvas.set_trajectory([])
 
     def closeEvent(self, event):
-        if hasattr(self, 'camera_thread'): self.camera_thread.stop()
-        if hasattr(self, 'serial_com'): self.serial_com.close()
-        if hasattr(self, 'simulator_window'): self.simulator_window.close()
+        """程序关闭事件处理"""
+        try:
+            if self.camera_thread is not None:
+                self.close_camera()
+                
+            if hasattr(self, 'serial_com'):
+                self.serial_com.close()
+                
+            if hasattr(self, 'simulator_window'):
+                self.simulator_window.close()
+                
+        except Exception as e:
+            print(f"关闭程序时出错: {e}")
+            
         event.accept()
 
 if __name__ == "__main__":
