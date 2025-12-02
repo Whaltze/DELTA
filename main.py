@@ -5,6 +5,8 @@ import signal
 import numpy as np
 from PySide6 import QtWidgets, QtCore, QtGui
 from PySide6.QtCore import QTimer
+from PySide6 import QtCore, QtWidgets, QtGui
+from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox
 
 from ui.UI import Ui_Widget
 import resources.rc.Background_rc as Background_rc
@@ -244,13 +246,36 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.ui.camera_selector.addItem(f"{name}", userData=idx)
             self.ui.cameraButton1.setEnabled(True)
 
+    # def init_camera(self):
+    #     idx = self.ui.camera_selector.currentData()
+    #     if idx is None: return
+    #     self.camera_thread = Camera()
+    #     self.camera_thread.set_cam_number(idx)
+    #     self.camera_thread.sendPicture.connect(self.receive_frame)
+    #     self.camera_thread.start()
+    #     self.ui.cameraButton1.setText("运行中")
+    #     self.ui.cameraButton1.setEnabled(False)
+    #     self.ui.cameraButton2.setEnabled(True)
+
     def init_camera(self):
-        idx = self.ui.camera_selector.currentData()
-        if idx is None: return
-        self.camera_thread.set_cam_number(idx)
+        """根据选择初始化并打开摄像头"""
+        if self.camera_thread and self.camera_thread.isRunning():
+            self.close_camera()
+
+        selected_index = self.ui.camera_selector.currentData()
+        if selected_index is None:
+            QMessageBox.warning(self, "摄像头错误", "未选择有效的摄像头。")
+            return
+
+        self.camera_thread = Camera()
+        self.camera_thread.set_cam_number(selected_index)
+
+        # 连接摄像头线程的信号
         self.camera_thread.sendPicture.connect(self.receive_frame)
+        self.camera_thread.object_detected_robot_coords.connect(self.vision_func.handle_object_detection)
+
         self.camera_thread.start()
-        self.ui.cameraButton1.setText("运行中")
+        self.ui.cameraButton1.setText("采集中...")
         self.ui.cameraButton1.setEnabled(False)
         self.ui.cameraButton2.setEnabled(True)
 
