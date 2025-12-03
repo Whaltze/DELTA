@@ -10,136 +10,156 @@ class VisionFunctionality(QObject):
     object_detected = Signal(dict)
     log = Signal(str)
 
-    def __init__(self, ui, serial_com):
+    def __init__(self, ui, motion_controller):
         super().__init__()
         self.ui = ui
-        self.serial_com = serial_com
+        self.motion_controller = motion_controller # 这里传入的是 DeltaMotionController 实例
         self.robot_mode = 'idle'
         
-        # [优化] 根据Delta机器人实际行程调整抓取高度和工作范围
         self.visual_sorting_origin_z = -220.0 
-        self.MAX_RADIUS = 280.0 # Delta机器人的最大活动半径
+        self.safe_z = -150.0  # 安全移动高度
+        self.MAX_RADIUS = 280.0
         
         self.processed_objects = [] 
-        self.DEBOUNCE_DIST = 40.0  # 稍微增大防抖距离
+        self.DEBOUNCE_DIST = 40.0
         self.DEBOUNCE_TIME = 6.0   
 
         self.detected_objects_list = []
+        self.is_dynamic_mode = False
+        self.detection_window_open = False 
+
+        # 定义分类用的垃圾桶坐标 (X, Y)
+        self.bins = {
+            1: (-150, 200), # Red
+            2: (0, 200),    # Yellow
+            3: (150, 200),  # Blue
+            4: (0, 250)     # Green
+        }
+
+    def set_dynamic_mode(self, state):
+        self.is_dynamic_mode = (state != 0)
+        self.log.emit(f"视觉模式: {'动态' if self.is_dynamic_mode else '静态'}")
 
     def start_visual_sorting(self):
         self.robot_mode = 'visual_sorting'
         self.processed_objects.clear()
-        self.ui.calibrationStatus.setText("状态: 视觉分类模式 (形状+颜色)")
-        self.log.emit("视觉分类启动: 等待物体进入视野...")
+        self.ui.calibrationStatus.setText("状态: 视觉分类中...")
+        self.log.emit("视觉分类启动")
+        if not self.is_dynamic_mode:
+            self.detection_window_open = True
+            QTimer.singleShot(5000, self._close_detection_window)
 
     def start_visual_picking(self):
         self.robot_mode = 'visual_picking_scan'
         self.detected_objects_list.clear()
-        self.ui.calibrationStatus.setText("状态: 正在扫描桌面 (3秒)...")
-        self.log.emit("开始视觉扫描...")
+        self.ui.calibrationStatus.setText("状态: 扫描中...")
+        self.log.emit("开始扫描桌面")
+        if not self.is_dynamic_mode:
+            self.detection_window_open = True
         QTimer.singleShot(3000, self._after_scanning)
+
+    def _close_detection_window(self):
+        if self.robot_mode != 'idle':
+            self.detection_window_open = False
+            self.log.emit("扫描窗口关闭")
 
     def _after_scanning(self):
         self.robot_mode = 'visual_picking_executing'
         count = len(self.detected_objects_list)
-        if count == 0:
-            self.ui.calibrationStatus.setText("扫描结束: 未发现物体")
+        self.log.emit(f"扫描完成: 发现 {count} 个目标")
+        if count > 0:
+            self.execute_picking_sequence_signal.emit()
+        else:
             self.robot_mode = 'idle'
-            return
-            
-        self.ui.calibrationStatus.setText(f"扫描结束: 发现 {count} 个目标")
-        self.log.emit(f"扫描完成，准备抓取 {count} 个物体")
-        self.execute_picking_sequence_signal.emit()
 
     def handle_object_detection(self, target_info):
+        if not self.is_dynamic_mode and not self.detection_window_open:
+            return
+        
         x, y, z = target_info['robot_coords']
         color = target_info['color']
-        shape = target_info.get('shape', 'Unknown')
         
-        # 过滤坐标：防止发送超出 Delta 工作半径的坐标 (假设最大半径280mm)
-        if (x**2 + y**2)**0.5 > 280: return
+        if (x**2 + y**2)**0.5 > self.MAX_RADIUS: return
 
-        self.object_detected.emit(target_info) # 更新仿真
-
-        # [打印到终端]
-        # 这样您就可以在控制台看到识别到的坐标
-        print(f"[VISION DETECTED] Color: {color}, Shape: {shape}, RobotPos: ({x:.1f}, {y:.1f}, {z:.1f})")
-
+        self.object_detected.emit(target_info)
         current_time = time.time()
 
-        # [打印识别结果到终端]
-        # 只有当开启了视觉功能时才打印，避免闲时刷屏
-        if self.robot_mode in ['visual_sorting', 'visual_picking_scan']:
-            print(f"[VISION] Detected: {color} {shape} at Robot(X={x:.1f}, Y={y:.1f})")
-
-        # ================= 分类模式逻辑 =================
+        # ================= 分类模式 =================
         if self.robot_mode == 'visual_sorting':
-            # 防抖动
             for obj in self.processed_objects:
-                dist = ((obj['x'] - x)**2 + (obj['y'] - y)**2)**0.5
-                if dist < self.DEBOUNCE_DIST and (current_time - obj['time'] < self.DEBOUNCE_TIME):
+                if ((obj['x']-x)**2 + (obj['y']-y)**2)**0.5 < self.DEBOUNCE_DIST and \
+                   (current_time - obj['time'] < self.DEBOUNCE_TIME):
                     return 
 
-            # 映射表: 颜色 -> 对应分拣槽位ID
             color_map = {'Red': 1, 'Yellow': 2, 'Blue': 3, 'Green': 4}
             if color not in color_map: return
-
             color_id = color_map[color]
             
-            # [终端打印] 确认执行动作
-            msg = f"执行分类: {color} {shape} -> ID {color_id}, Coords: ({x:.1f}, {y:.1f})"
-            print(f">>> {msg}") 
-            self.log.emit(msg)
+            self.log.emit(f"执行分类: {color} -> ID {color_id}")
             
-            # 发送指令
-            self.serial_com.send_packet(
-                command=self.serial_com.CMD_VISION_CLASSIFY,
-                x=float(x), y=float(y), z=float(self.visual_sorting_origin_z), 
-                speed=5, dirc1=int(color_id)
-            )
+            # --- 执行物理动作序列 ---
+            self._execute_sorting_action(x, y, color_id)
             
             self.processed_objects.append({'x': x, 'y': y, 'time': current_time})
-            # 清理过期防抖记录
-            self.processed_objects = [o for o in self.processed_objects if current_time - o['time'] < self.DEBOUNCE_TIME]
 
-        # ================= 拾取模式逻辑 =================
+        # ================= 拾取扫描模式 =================
         elif self.robot_mode == 'visual_picking_scan':
-            # 简单的去重
             is_duplicate = False
             for obj in self.detected_objects_list:
-                dist = ((obj['robot_coords'][0] - x)**2 + (obj['robot_coords'][1] - y)**2)**0.5
-                if dist < self.DEBOUNCE_DIST:
+                if ((obj['robot_coords'][0]-x)**2 + (obj['robot_coords'][1]-y)**2)**0.5 < self.DEBOUNCE_DIST:
                     is_duplicate = True
                     break
             
             if not is_duplicate:
-                print(f"[SCAN] Added to queue: {color} {shape} ({x:.1f}, {y:.1f})")
                 self.detected_objects_list.append(target_info)
-    def execute_picking_sequence(self):
-        if not self.detected_objects_list:
-            return
+                self.log.emit(f"添加目标: {color} ({x:.1f}, {y:.1f})")
 
-        self.log.emit(">>> 开始批量码垛执行 <<<")
+    def _execute_sorting_action(self, x, y, color_id):
+        """执行具体的 吸取->移动->放置 动作"""
+        bin_x, bin_y = self.bins.get(color_id, (150, 0))
+        ctrl = self.motion_controller
+        
+        # 1. 移动到物体上方
+        ctrl.move_to_xyz(x, y, self.safe_z, wait=True)
+        # 2. 下降
+        ctrl.move_to_xyz(x, y, self.visual_sorting_origin_z, wait=True)
+        # 3. 吸气 (打开IO)
+        ctrl.set_digital_output(ctrl.GRIPPER_OUT_PORT, True)
+        time.sleep(0.5)
+        # 4. 抬起
+        ctrl.move_to_xyz(x, y, self.safe_z, wait=True)
+        # 5. 移动到垃圾桶上方
+        ctrl.move_to_xyz(bin_x, bin_y, self.safe_z, wait=True)
+        # 6. 放气 (关闭IO)
+        ctrl.set_digital_output(ctrl.GRIPPER_OUT_PORT, False)
+
+    def execute_picking_sequence(self):
+        if not self.detected_objects_list: return
+        self.log.emit("开始批量抓取")
         self._send_next_pick_command(0)
 
     def _send_next_pick_command(self, index):
         if index >= len(self.detected_objects_list) or self.robot_mode == 'idle':
             self.robot_mode = 'idle'
-            self.log.emit("批量任务完成")
+            self.log.emit("批量抓取完成")
             self.ui.calibrationStatus.setText("状态: 空闲")
             return
 
         item = self.detected_objects_list[index]
         x, y, z = item['robot_coords']
-        shape = item.get('shape', '')
-        z_pick = self.visual_sorting_origin_z
         
-        self.ui.calibrationStatus.setText(f"处理中 ({index+1}/{len(self.detected_objects_list)}): {item['color']} {shape}")
+        self.ui.calibrationStatus.setText(f"抓取中 ({index+1}/{len(self.detected_objects_list)})...")
         
-        # 发送抓取指令
-        self.serial_com.send_packet(command=self.serial_com.CMD_FETCH, x=float(x), y=float(y), z=float(z_pick))
+        # 执行单次抓取动作 (这里仅做演示动作：下去再上来)
+        ctrl = self.motion_controller
+        ctrl.move_to_xyz(x, y, self.safe_z, wait=True)
+        ctrl.move_to_xyz(x, y, self.visual_sorting_origin_z, wait=True)
+        ctrl.set_digital_output(ctrl.GRIPPER_OUT_PORT, True)
+        time.sleep(0.5)
+        ctrl.move_to_xyz(x, y, self.safe_z, wait=True)
+        # 假设放置在固定位置 (200, 0)
+        ctrl.move_to_xyz(200, 0, self.safe_z, wait=True)
+        ctrl.set_digital_output(ctrl.GRIPPER_OUT_PORT, False)
         
-        # [优化] 根据实际机械运动时间调整间隔，避免指令堆积
-        # 建议：如果串口有“动作完成”的回传信号，最好改成监听信号触发下一步
-        delay_ms = 4500 
-        QTimer.singleShot(delay_ms, lambda: self._send_next_pick_command(index + 1))
+        # 延时后执行下一个
+        QTimer.singleShot(500, lambda: self._send_next_pick_command(index + 1))

@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>1361</width>
-    <height>812</height>
+    <height>798</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -182,7 +182,7 @@
     <property name="geometry">
      <rect>
       <x>40</x>
-      <y>60</y>
+      <y>70</y>
       <width>100</width>
       <height>25</height>
      </rect>
@@ -201,7 +201,7 @@
     <property name="geometry">
      <rect>
       <x>180</x>
-      <y>60</y>
+      <y>70</y>
       <width>100</width>
       <height>25</height>
      </rect>
@@ -219,7 +219,7 @@
       <x>15</x>
       <y>110</y>
       <width>290</width>
-      <height>218</height>
+      <height>211</height>
      </rect>
     </property>
     <property name="styleSheet">
@@ -251,7 +251,7 @@
       </rect>
      </property>
      <property name="text">
-      <string>启用仿真显示</string>
+      <string> 启用仿真显示</string>
      </property>
      <property name="checked">
       <bool>false</bool>
@@ -574,7 +574,7 @@
     <property name="geometry">
      <rect>
       <x>350</x>
-      <y>80</y>
+      <y>120</y>
       <width>100</width>
       <height>31</height>
      </rect>
@@ -590,7 +590,7 @@
     <property name="geometry">
      <rect>
       <x>480</x>
-      <y>80</y>
+      <y>120</y>
       <width>100</width>
       <height>31</height>
      </rect>
@@ -602,24 +602,11 @@
      <string>视觉拾取</string>
     </property>
    </widget>
-   <widget class="QComboBox" name="comboBox">
-    <property name="geometry">
-     <rect>
-      <x>350</x>
-      <y>130</y>
-      <width>100</width>
-      <height>31</height>
-     </rect>
-    </property>
-    <property name="styleSheet">
-     <string notr="true">background-color: hsla(0, 0.00%, 49.00%, 0.25); border-radius: 5px; border: 1px solid hsla(213, 88.40%, 62.90%, 0.94)</string>
-    </property>
-   </widget>
    <widget class="QPushButton" name="pushButton_6">
     <property name="geometry">
      <rect>
-      <x>480</x>
-      <y>130</y>
+      <x>160</x>
+      <y>75</y>
       <width>100</width>
       <height>31</height>
      </rect>
@@ -635,9 +622,9 @@
     <property name="geometry">
      <rect>
       <x>10</x>
-      <y>35</y>
+      <y>130</y>
       <width>271</width>
-      <height>171</height>
+      <height>91</height>
      </rect>
     </property>
     <property name="title">
@@ -744,9 +731,9 @@
     <property name="geometry">
      <rect>
       <x>10</x>
-      <y>120</y>
+      <y>230</y>
       <width>271</width>
-      <height>351</height>
+      <height>231</height>
      </rect>
     </property>
     <property name="title">
@@ -895,8 +882,8 @@
     <widget class="QPushButton" name="run_jog_sequence_button">
      <property name="geometry">
       <rect>
-       <x>15</x>
-       <y>305</y>
+       <x>10</x>
+       <y>180</y>
        <width>241</width>
        <height>31</height>
       </rect>
@@ -1127,6 +1114,77 @@
      </property>
     </widget>
    </widget>
+   <widget class="QCheckBox" name="vision_dynamic_checkbox">
+    <property name="geometry">
+     <rect>
+      <x>320</x>
+      <y>35</y>
+      <width>120</width>
+      <height>20</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>启用动态识别</string>
+    </property>
+    <property name="checked">
+     <bool>false</bool>
+    </property>
+   </widget>
+   <widget class="QComboBox" name="comboBox">
+    <property name="geometry">
+     <rect>
+      <x>20</x>
+      <y>75</y>
+      <width>100</width>
+      <height>31</height>
+     </rect>
+    </property>
+    <property name="styleSheet">
+     <string notr="true">background-color: hsla(0, 0.00%, 49.00%, 0.25); border-radius: 5px; border: 1px solid hsla(213, 88.40%, 62.90%, 0.94)</string>
+    </property>
+   </widget>
+   <widget class="QCheckBox" name="visualization_checkbox">
+    <property name="geometry">
+     <rect>
+      <x>20</x>
+      <y>35</y>
+      <width>161</width>
+      <height>20</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string> 启用曲线可视化</string>
+    </property>
+    <property name="checked">
+     <bool>false</bool>
+    </property>
+   </widget>
+   <widget class="QComboBox" name="color_comboBox">
+    <property name="geometry">
+     <rect>
+      <x>480</x>
+      <y>75</y>
+      <width>100</width>
+      <height>31</height>
+     </rect>
+    </property>
+    <property name="styleSheet">
+     <string notr="true">background-color: hsla(0, 0.00%, 49.00%, 0.25); border-radius: 5px; border: 1px solid hsla(213, 88.40%, 62.90%, 0.94)</string>
+    </property>
+   </widget>
+   <widget class="QComboBox" name="shape_comboBox">
+    <property name="geometry">
+     <rect>
+      <x>350</x>
+      <y>75</y>
+      <width>100</width>
+      <height>31</height>
+     </rect>
+    </property>
+    <property name="styleSheet">
+     <string notr="true">background-color: hsla(0, 0.00%, 49.00%, 0.25); border-radius: 5px; border: 1px solid hsla(213, 88.40%, 62.90%, 0.94)</string>
+    </property>
+   </widget>
   </widget>
   <widget class="QGroupBox" name="status_group">
    <property name="geometry">
@@ -1163,7 +1221,7 @@
      </rect>
     </property>
     <property name="text">
-     <string>X</string>
+     <string>A</string>
     </property>
    </widget>
    <widget class="QTextBrowser" name="textBrowser_3">
@@ -1189,7 +1247,7 @@
      </rect>
     </property>
     <property name="text">
-     <string>Y</string>
+     <string>B</string>
     </property>
    </widget>
    <widget class="QTextBrowser" name="textBrowser_4">
@@ -1215,7 +1273,7 @@
      </rect>
     </property>
     <property name="text">
-     <string>Z</string>
+     <string>C</string>
     </property>
    </widget>
    <widget class="QTextBrowser" name="textBrowser_5">

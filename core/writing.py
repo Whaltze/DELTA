@@ -3,9 +3,9 @@
 from PySide6.QtCore import QTimer
 
 class WritingFunctionality:
-    def __init__(self, ui, serial_com, writing_canvas, logger=None, simulator=None):
+    def __init__(self, ui, motion_controller, writing_canvas, logger=None, simulator=None):
         self.ui = ui
-        self.serial_com = serial_com
+        self.motion_controller = motion_controller # DeltaMotionController
         self.writing_canvas = writing_canvas
         self.logger = logger or print
         self.simulator = simulator
@@ -15,15 +15,6 @@ class WritingFunctionality:
         self.current_writing_index = 0
         self.writing_timer = QTimer()
         self.writing_timer.timeout.connect(self.send_next_writing_point)
-
-    def clear_state(self):
-        self.writing_trajectory = []
-        self.current_writing_index = 0
-        if self.simulator:
-            # 这里传空列表给仿真器，仿真器已修复处理空列表的逻辑
-            self.simulator.set_trajectory([])
-        self.ui.writing_status.setText("状态: 画布已清空")
-
     def text_to_trajectory(self, text, font_size=45, area_size=150, z_height=-280):
         # 优化策略：FZU专用逻辑 + 垂直提笔(消除拖尾) + 倒角美化
         trajectory = []
@@ -157,7 +148,7 @@ class WritingFunctionality:
             
         self.logger(f"手写轨迹已生成，写字高度: {z_write}")
         return True
-
+    
     def preview_writing_trajectory(self):
         try:
             self.writing_trajectory = []
@@ -183,14 +174,26 @@ class WritingFunctionality:
                 
         except Exception as e:
             self.logger(f"轨迹错误: {e}")
+    def clear_state(self):
+        self.writing_trajectory = []
+        self.current_writing_index = 0
+        if self.simulator:
+            self.simulator.set_trajectory([])
+        self.ui.writing_status.setText("状态: 画布已清空")
+
+    # ... (text_to_trajectory 和 use_handwriting_trajectory 函数逻辑无需修改，略) ...
+    # 请保留您原文件中的 trajectory 生成逻辑
 
     def start_writing(self):
         if not self.writing_trajectory: return
         self.writing_mode = 'writing'
         self.current_writing_index = 0
-        speed = self.ui.writing_speed.value()
-        interval = int(200 - (speed - 1) * 15)
-        self.writing_timer.start(interval)
+        
+        # 调整速度: 时间间隔越短，写字越快
+        # 注意: 如果板卡指令缓存溢出，需要增大间隔
+        speed_level = self.ui.writing_speed.value()
+        interval = int(100 - (speed_level - 1) * 8) 
+        self.writing_timer.start(max(20, interval))
 
     def stop_writing(self):
         self.writing_timer.stop()
@@ -202,10 +205,13 @@ class WritingFunctionality:
             point = self.writing_trajectory[self.current_writing_index]
             x, y, z, _ = point
             
-            # 发送硬件指令
-            self.serial_com.send_packet(command=self.serial_com.CMD_JOG, x=x, y=y, z=z)
+            # [修改] 使用运动控制卡移动
+            success = self.motion_controller.move_to_xyz(x, y, z, wait=False)
             
-            # 发送仿真指令
+            if not success:
+                self.logger(f"写字警告: 点 ({x:.1f}, {y:.1f}) 超出范围或控制卡错误")
+            
+            # 更新仿真
             if self.simulator and self.ui.simulator_enable_checkbox.isChecked():
                 self.simulator.update_robot_state([x, y, z])
                 
