@@ -38,66 +38,57 @@ class ErrorCode(enum.IntEnum):
 
 class IMCControl:
     def __init__(self, lib_path: str):
+        # self.handle = ctypes.c_void_p()
         self.handle = None
         self.lib = ctypes.CDLL(lib_path)  # Load the shared library
-
-    def _call_imc(self, func_name: str, argtypes: list, restype, *args):
-        """
-        Helper: set argtypes/restype and call lib function with plain Python args.
-        Returns the raw return value from the C function.
-        """
-        func = getattr(self.lib, func_name)
-        func.argtypes = argtypes
-        func.restype = restype
-        return func(*args)
 
     ##########
     # 设备函数
 
-    def find_net_card(self):
-        """
-        用于查找电脑的以太网卡，以便于选择与控制卡连接的网卡
-
-        :param self: class
-        """
-        info: ctypes.Array[ctypes.c_char] = ctypes.create_string_buffer(16*256)
-        num: ctypes.c_int = ctypes.c_int()
-
-        result = self._call_imc('IMC_FindNetCard', [ctypes.c_char_p, ctypes.POINTER(ctypes.c_int)], ctypes.c_int,
-                                         info, ctypes.byref(num))
-        cards: List[str] = [info.raw[i * 256: (i + 1) * 256].decode('utf-8').strip('\x00') for i in range(num.value)]
-        return (result == 0), cards
-
     # def find_net_card(self):
     #     """
     #     用于查找电脑的以太网卡，以便于选择与控制卡连接的网卡
-    #     返回: (成功状态, 网卡列表)
+        
+    #     :param self: class
     #     """
-    #     try:
-    #         # 检查lib是否加载
-    #         if not hasattr(self.lib, 'IMC_FindNetCard'):
-    #             return False, []
+    #     info: ctypes.Array[ctypes.c_char] = ctypes.create_string_buffer(16*256)
+    #     num: ctypes.c_int = ctypes.c_int()
 
-    #         # 分配缓冲区
-    #         info = ctypes.create_string_buffer(256 * 16)  # 16个256字节的字符串
-    #         num = ctypes.c_int()
+    #     result: bool = self.lib.IMC_FindNetCard(ctypes.byref(info), ctypes.byref(num)) == 0
+    #     cards: List[str] = [info.raw[i * 256: (i + 1) * 256].decode('utf-8').strip() for i in range(num.value)]
+    #     return result, cards
 
-    #         # 调用库函数
-    #         result = self.lib.IMC_FindNetCard(ctypes.byref(info), ctypes.byref(num))
-
-    #         if result == 0:
-    #             # 解析网卡信息
-    #             cards = []
-    #             for i in range(num.value):
-    #                 card_info = info.raw[i*256:(i+1)*256].decode('utf-8').strip('\x00')
-    #                 if card_info:
-    #                     cards.append(card_info)
-    #             return True, cards
-    #         else:
-    #             return False, []
-    #     except Exception as e:
-    #         print(f"查找网卡异常: {e}")
-    #         return False, []
+    def find_net_card(self):
+        """
+        用于查找电脑的以太网卡，以便于选择与控制卡连接的网卡
+        返回: (成功状态, 网卡列表)
+        """
+        try:
+            # 检查lib是否加载
+            if not hasattr(self.lib, 'IMC_FindNetCard'):
+                return False, []
+            
+            # 分配缓冲区
+            info = ctypes.create_string_buffer(256 * 16)  # 16个256字节的字符串
+            num = ctypes.c_int()
+            
+            # 调用库函数
+            result = self.lib.IMC_FindNetCard(ctypes.byref(info), ctypes.byref(num))
+            
+            if result == 0:
+                # 解析网卡信息
+                cards = []
+                for i in range(num.value):
+                    card_info = info.raw[i*256:(i+1)*256].decode('utf-8').strip('\x00')
+                    if card_info:
+                        cards.append(card_info)
+                return True, cards
+            else:
+                return False, []
+        except Exception as e:
+            print(f"查找网卡异常: {e}")
+            return False, []
+    
 
     def open(self, net_card_index: int, imcid: int) -> bool:
         """
@@ -113,54 +104,41 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle != None:
-            logging.error(f'控制卡句柄已打开：{self.handle}')
+        if self.handle.value != None:
+            logging.error(f'控制卡句柄已打开：{self.handle.value}')
             return False
 
-        handle = self._call_imc('IMC_Open', [ctypes.c_int, ctypes.c_int], ctypes.c_void_p,
-                                net_card_index, imcid)
+        self.lib.IMC_Open.restype = ctypes.c_void_p
+        handle: ctypes.c_void_p = self.lib.IMC_Open(ctypes.c_int(net_card_index), ctypes.c_int(imcid))
+        self.handle: ctypes.c_void_p = handle
 
-        self.handle = handle
-        return bool(handle != None)
+        print(type(handle))
+        ret = bool(handle.value != None)
+        return ret
 
-    def open_x(self, net_card_index: int, imcid: int, timeout: int = 40, open_mode: int = 1) -> bool:
+    
+    def close(self) -> bool:
         """
-        用于打开控制卡设备，与设备建立通信连接
+        用于关闭控制卡设备，断开通信连接
+        """
+        # 修复: 直接检查self.handle是否为None
+        if self.handle is None:
+            logging.error('控制卡句柄未打开')
+            return False
 
-        1. 所有的对设备进行操作的函数在使用前，必须调用一个打开设备函数获得设备句柄，使用此句柄才能与设备进行通信
-        2. Timeout 参数最小值为 1，用于设置通信函数等待的超时时间。如果电脑的运算速度慢，建议设置超时时间长些
-        3. openMode 参数，一般情况下使用混杂模式，通信时间会快一些。但混杂模式，对某些无线网卡不支持，只能使用非混杂模式
+        # 调用库函数关闭控制卡
+        # 注意：传入整数句柄，不是c_void_p
+        ret = self.lib.IMC_Close(ctypes.c_int(self.handle))
         
-        :param self: class
-        :param net_card_index: 网卡索引，由搜索网卡函数返回的结果决定
-        :type net_card_index: int
-        :param imcid: IMC 控制卡的 id，由控制卡上的拨码开关设置决定
-        :type imcid: int
-        :param timeout: 通信超时时间，单位毫秒
-        :type timeout: int
-        :param open_mode: 打开模式；1：混杂模式， 0：非混杂模式
-        :type open_mode: int
-        :return: 是否成功
-        :rtype: bool
-        """
-        if self.handle != None:
-            logging.error(f'控制卡句柄已打开：{self.handle}')
-            return False
+        if ret == 0:  # 假设返回0表示成功
+            logging.info('控制卡关闭成功')
+            self.handle = None
+            return True
+        else:
+            logging.error('控制卡关闭失败')
+            return False    
 
-        if timeout < 1:
-            logging.error(f'timeout参数最小值为1，当前值为{timeout}')
-            return False
-
-        if open_mode not in (0, 1):
-            logging.error(f'无效的打开模式：{open_mode}')
-            return False
-
-        handle = self._call_imc('IMC_OpenX', [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int], ctypes.c_void_p,
-                                net_card_index, imcid, timeout, open_mode)
-
-        self.handle = handle
-        return bool(handle != None)
-
+    
     def open_by_password(self, net_card_index: int, imcid: int, password: str) -> bool:
         """
         用于打开控制卡设备，与设备建立通信连接
@@ -179,22 +157,21 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle != None:
-            logging.error(f'控制卡句柄已打开：{self.handle}')
+        if self.handle.value != None:
+            logging.error(f'控制卡句柄已打开：{self.handle.value}')
             return False
-
+        
         if 4 <= len(password) < 100:
             logging.error(f'密码长度应在4到16之间，当前长度为{len(password)}')
             return False
-
+        
         pwd: ctypes.Array[ctypes.c_char] = ctypes.create_string_buffer(password.encode('utf-8'))
-
-        handle = self._call_imc('IMC_OpenUsePassword', [ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_char)], ctypes.c_void_p,
-                                  net_card_index, imcid, ctypes.byref(pwd))
-
+        
+        handle: ctypes.c_void_p = self.lib.IMC_OpenX(ctypes.c_int(net_card_index), ctypes.c_int(imcid), ctypes.byref(pwd))
         self.handle = handle
-        return bool(handle != None)
 
+        return bool(handle.value != None)
+    
     def close(self) -> bool:
         """
         此函数用于关闭打开的设备
@@ -205,16 +182,13 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-
-        result = self._call_imc('IMC_Close', [ctypes.c_void_p], ctypes.c_int,
-                                self.handle)
-        self.handle = None
-
-        return bool(result != 0)
-
+        
+        result: ctypes.c_int = self.lib.IMC_Close(self.handle)
+        return bool(result.value != 0)
+    
     ##########
     # 配置控制卡函数
 
@@ -230,15 +204,13 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
 
-        result = self._call_imc('IMC_InitCfg', [ctypes.c_void_p], ctypes.c_int,
-                                self.handle)
-
-        return bool(result != 0)
-
+        result: ctypes.c_int = self.lib.IMC_InitCfg(self.handle)
+        return bool(result.value != 0)
+    
     def clear_imc(self) -> bool:
         """
         清空控制卡中所有 FIFO 中的未执行的指令
@@ -247,15 +219,13 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
 
-        result = self._call_imc('IMC_ClearIMC', [ctypes.c_void_p], ctypes.c_int,
-                                self.handle)
-
-        return bool(result != 0)
-
+        result: ctypes.c_int = self.lib.IMC_ClearIMC(self.handle)
+        return bool(result.value != 0)
+    
     def clear_axis(self, axis_num: int) -> bool:
         """
         清空轴的所有状态
@@ -266,19 +236,17 @@ class IMCControl:
         :param axis_num: 轴号
         :type axis_num: int
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-
+        
         if axis_num not in range(0, 16):
             logging.error(f'轴编号超限：{axis_num}')
             return False
 
-        result = self._call_imc('IMC_ClearAxis', [ctypes.c_void_p, ctypes.c_int], ctypes.c_int,
-                                self.handle, axis_num)
-
-        return bool(result != 0)
-
+        result: ctypes.c_int = self.lib.IMC_ClearAxis(self.handle, ctypes.c_int(axis_num))
+        return bool(result.value != 0)
+    
     def set_pul_width(self, axis_num: int, time_ns: int = 2000) -> Tuple[bool, int]:
         """
         设置指定轴的有效电平的脉冲宽度
@@ -291,23 +259,21 @@ class IMCControl:
         :return: [是否成功, 实际设置的脉冲宽度]
         :rtype: Tuple[bool, int]
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False, int(0)
-
+        
         if axis_num not in range(0, 16):
             logging.error(f'轴编号超限：{axis_num}')
             return False, int(0)
-
+        
         if time_ns < 16:
             logging.error(f'脉冲宽度超限：{axis_num}')
             return False, int(0)
-
-        result = self._call_imc('IMC_SetPulWidth', [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int], ctypes.c_int,
-                                self.handle, time_ns, axis_num)
-
-        return bool(result != 0), result
-
+        
+        result: ctypes.c_int = self.lib.IMC_SetPulWidth(self.handle, ctypes.c_uint(time_ns), ctypes.c_int(axis_num))
+        return bool(result.value != 0), result.value
+    
     def set_pul_polar(self, axis_num: int, pul: bool, dir: bool) -> bool:
         """
         设置指定轴的脉冲和方向的有效电平
@@ -322,25 +288,23 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-
+        
         if axis_num not in range(0, 16):
             logging.error(f'轴编号超限：{axis_num}')
             return False
-
-        result = self._call_imc('IMC_SetPulPolar', [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int], ctypes.c_int,
-                                self.handle, pul, dir, axis_num)
-
-        return bool(result != 0)
-
+        
+        result: ctypes.c_int = self.lib.IMC_SetPulPolar(self.handle, ctypes.c_int(pul), ctypes.c_int(dir), ctypes.c_int(axis_num))
+        return bool(result.value != 0)
+        
     def set_encoder_enable(self, axis_num: int, enable: bool = True) -> bool:
         """
         使能/禁用控制卡接收编码器反馈
 
         控制卡中默认禁用编码器反馈，而是使用内部虚拟反馈
-
+        
         :param self: class
         :param axis_num: 需要使能/禁止控制卡接收编码器反馈的轴号
         :type axis_num: int
@@ -349,19 +313,17 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-
+        
         if axis_num not in range(0, 16):
             logging.error(f'轴编号超限：{axis_num}')
             return False
-
-        result = self._call_imc('IMC_SetEncpEna', [ctypes.c_void_p, ctypes.c_int, ctypes.c_int], ctypes.c_int,
-                                self.handle, enable, axis_num)
-
-        return bool(result != 0)
-
+        
+        result: ctypes.c_int = self.lib.IMC_SetEncpEna(self.handle, ctypes.c_int(enable), ctypes.c_int(axis_num))
+        return bool(result.value != 0)
+    
     def set_encoder_mode(self, axis_num: int, mode: int = 0, dir: int = 1) -> bool:
         """
         设置控制卡接收编码器反馈的计数模式和计数方向
@@ -380,25 +342,25 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-
+        
         if axis_num not in range(0, 16):
             logging.error(f'轴编号超限：{axis_num}')
             return False
-
+        
         if mode not in (0, 1):
             logging.error(f'编码器模式错误：{mode}')
             return False
-
+        
         if dir not in (0, 1):
             logging.error(f'编码器方向错误：{dir}')
             return False
-        result = self._call_imc('IMC_SetEncpMode', [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int], ctypes.c_int,
-                                self.handle, mode, dir, axis_num)
-        return bool(result != 0)
-
+        
+        result: ctypes.c_int = self.lib.IMC_SetEncpMode(self.handle, ctypes.c_int(mode), ctypes.c_int(dir), ctypes.c_int(axis_num))
+        return bool(result.value != 0)
+    
     def set_encoder_rate(self, axis_num: int, rate: float) -> bool:
         """
         设置编码器反馈倍率
@@ -414,17 +376,17 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-
+        
         if axis_num not in range(0, 16):
             logging.error(f'轴编号超限：{axis_num}')
             return False
-        result = self._call_imc('IMC_SetEncpRate', [ctypes.c_void_p, ctypes.c_double, ctypes.c_int], ctypes.c_int,
-                                self.handle, rate, axis_num)
-        return bool(result != 0)
-
+        
+        result: ctypes.c_int = self.lib.IMC_SetEncpRate(self.handle, ctypes.c_double(rate), ctypes.c_int(axis_num))
+        return bool(result.value != 0)
+    
     def set_vel_acc_limit(self, axis_num: int, vellim: float,acclim: float) -> bool:
         """
         设置轴的速度和加速度极限
@@ -442,25 +404,25 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-
+        
         if axis_num not in range(0, 16):
             logging.error(f'轴编号超限：{axis_num}')
             return False
-
+        
         if not (0 <= vellim <= 32767.9999):
             logging.error(f'速度限制超限：{vellim}')
             return False
-
+        
         if not (0 <= acclim <= 32767.9999):
             logging.error(f'加速度限制超限：{acclim}')
             return False
-        result = self._call_imc('IMC_SetVelAccLimit', [ctypes.c_void_p, ctypes.c_double, ctypes.c_double, ctypes.c_int], ctypes.c_int,
-                                self.handle, vellim, acclim, axis_num)
-        return bool(result != 0)
-
+        
+        result: ctypes.c_int = self.lib.IMC_SetVelAccLimit(self.handle, ctypes.c_double(vellim), ctypes.c_double(acclim), ctypes.c_int(axis_num))
+        return bool(result.value != 0)
+    
     def set_smooth(self, axis_num: int, smooth: int = 64) -> bool:
         """
         设置每个轴的平滑度
@@ -477,21 +439,21 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-
+        
         if axis_num not in range(0, 16):
             logging.error(f'轴编号超限：{axis_num}')
             return False
-
+        
         if smooth not in range(0, 32768):
             logging.error(f'平滑度超限：{axis_num}')
             return False
-        result = self._call_imc('IMC_SetSmooth', [ctypes.c_void_p, ctypes.c_short, ctypes.c_int], ctypes.c_int,
-                                self.handle, smooth, axis_num)
-        return bool(result != 0)
-
+        
+        result: ctypes.c_int = self.lib.IMC_SetSmooth(self.handle, ctypes.c_short(smooth), ctypes.c_int(axis_num))
+        return bool(result.value != 0)
+    
     def set_enable(self, axis_num: int, enable: bool = False) -> bool:
         """
         使能/禁止指定轴的驱动器
@@ -508,19 +470,19 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-
+        
         if axis_num not in range(0, 16):
             logging.error(f'轴编号超限：{axis_num}')
             return False
-        result = self._call_imc('IMC_SetEna', [ctypes.c_void_p, ctypes.c_int, ctypes.c_int], ctypes.c_int,
-                                self.handle, enable, axis_num)
-        return bool(result != 0)
-
-    def set_hw_limit(self, axis_num: int,
-                     positive_limit_enable: bool = True, negative_limit_enable: bool = True,
+        
+        result: ctypes.c_int = self.lib.IMC_SetEna(self.handle, ctypes.c_int(enable), ctypes.c_int(axis_num))
+        return bool(result.value != 0)
+    
+    def set_hw_limit(self, axis_num: int, 
+                     positive_limit_enable: bool = True, negative_limit_enable: bool = True, 
                      positive_limit_polar: bool = False, negative_limit_polar: bool = False) -> bool:
         """
         使能/禁用硬件输入端口限位功能和设置其有效极性
@@ -541,17 +503,20 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-
+        
         if axis_num not in range(0, 16):
             logging.error(f'轴编号超限：{axis_num}')
             return False
-        result = self._call_imc('IMC_Setlimit', [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int], ctypes.c_int,
-                                self.handle, positive_limit_enable, positive_limit_polar, negative_limit_enable, negative_limit_polar, axis_num)
-        return bool(result != 0)
-
+        
+        result: ctypes.c_int = self.lib.IMC_Setlimit(self.handle, 
+                                                     ctypes.c_int(positive_limit_enable), ctypes.c_int(positive_limit_polar),
+                                                     ctypes.c_int(negative_limit_enable), ctypes.c_int(negative_limit_polar),
+                                                     ctypes.c_int(axis_num))
+        return bool(result.value != 0)
+    
     def set_alarm(self, axis_num: int, enable: bool = False, polar: bool = False) -> bool:
         """
         使能/禁用伺服报警输入和设置其有效极性
@@ -568,17 +533,19 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-
+        
         if axis_num not in range(0, 16):
             logging.error(f'轴编号超限：{axis_num}')
             return False
-        result = self._call_imc('IMC_SetAlm', [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int], ctypes.c_int,
-                                self.handle, enable, polar, axis_num)
-        return bool(result != 0)
-
+        
+        result: ctypes.c_int = self.lib.IMC_SetAlm(self.handle, 
+                                                   ctypes.c_int(enable), ctypes.c_int(polar),
+                                                   ctypes.c_int(axis_num))
+        return bool(result.value != 0)
+    
     def set_in_place_input(self, axis_num: int, enable: bool = False, polar: bool = False) -> bool:
         """
         使能/禁用伺服到位输入和设置其有效极性
@@ -595,17 +562,19 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-
+        
         if axis_num not in range(0, 16):
             logging.error(f'轴编号超限：{axis_num}')
             return False
-        result = self._call_imc('IMC_SetINP', [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int], ctypes.c_int,
-                                self.handle, enable, polar, axis_num)
-        return bool(result != 0)
-
+        
+        result: ctypes.c_int = self.lib.IMC_SetINP(self.handle, 
+                                                   ctypes.c_int(enable), ctypes.c_int(polar),
+                                                   ctypes.c_int(axis_num))
+        return bool(result.value != 0)
+    
     def set_emergency_stop_polar(self, axis_num: int, polar: bool = False) -> bool:
         """
         设置急停输入端的有效极性
@@ -620,17 +589,17 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-
+        
         if axis_num not in range(0, 16):
             logging.error(f'轴编号超限：{axis_num}')
             return False
-        result = self._call_imc('IMC_SetEmstopPolar', [ctypes.c_void_p, ctypes.c_int, ctypes.c_int], ctypes.c_int,
-                                self.handle, polar, axis_num)
-        return bool(result != 0)
-
+        
+        result: ctypes.c_int = self.lib.IMC_SetEmstopPolar(self.handle,  ctypes.c_int(polar), ctypes.c_int(axis_num))
+        return bool(result.value != 0)
+    
     def set_uni_input_polar(self, input_num: int, polar: bool = False) -> bool:
         """
         设置通用输入端的有效极性
@@ -646,17 +615,17 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-
+        
         if input_num not in range(1, 32 + 1):
             logging.error(f'输入端口编号超限：{input_num}')
             return False
-        result = self._call_imc('IMC_SetInPolar', [ctypes.c_void_p, ctypes.c_int, ctypes.c_int], ctypes.c_int,
-                                self.handle, polar, input_num)
-        return bool(result != 0)
-
+        
+        result: ctypes.c_int = self.lib.IMC_SetInPolar(self.handle,  ctypes.c_int(polar), ctypes.c_int(input_num))
+        return bool(result.value != 0)
+    
     def set_stop_flit(self, axis_num: int, stop: bool = True) -> bool:
         """
         设置错误发生时，运动轴是否停止运行
@@ -673,18 +642,18 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-
+        
         if axis_num not in range(0, 16):
             logging.error(f'轴编号超限：{axis_num}')
             return False
-        result = self._call_imc('IMC_SetStopfilt', [ctypes.c_void_p, ctypes.c_int, ctypes.c_int], ctypes.c_int,
-                                self.handle, stop, axis_num)
-        return bool(result != 0)
-
-    def set_exit_flit(self, axis_num: int, is_exit: bool = True) -> bool:
+        
+        result: ctypes.c_int = self.lib.IMC_SetStopfilt(self.handle,  ctypes.c_int(stop), ctypes.c_int(axis_num))
+        return bool(result.value != 0)
+    
+    def set_exit_flit(self, axis_num: int, exit: bool = True) -> bool:
         """
         设置错误发生时，运动轴是否退出运行
 
@@ -700,24 +669,18 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-
+        
         if axis_num not in range(0, 16):
             logging.error(f'轴编号超限：{axis_num}')
             return False
-        result = self._call_imc(
-            "IMC_SetExitfilt",
-            [ctypes.c_void_p, ctypes.c_int, ctypes.c_int],
-            ctypes.c_int,
-            self.handle,
-            is_exit,
-            axis_num,
-        )
-        return bool(result != 0)
-
-    def set_recoup_range(self, axis_num: int, err_range: int) -> bool:
+        
+        result: ctypes.c_int = self.lib.IMC_SetExitfilt(self.handle,  ctypes.c_int(exit), ctypes.c_int(axis_num))
+        return bool(result.value != 0)
+    
+    def set_recoup_range(self, axis_num: int, range: int) -> bool:
         """
         设置静态补偿的范围
 
@@ -731,30 +694,30 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-
+        
         if axis_num not in range(0, 16):
             logging.error(f'轴编号超限：{axis_num}')
             return False
-
-        if err_range not in range(0, 32768):
-            logging.error(f"静态补偿范围超限：{err_range}")
+        
+        if range not in range(0, 32768):
+            logging.error(f'静态补偿范围超限：{range}')
             return False
-        result = self._call_imc('IMC_SetRecoupRange', [ctypes.c_void_p, ctypes.c_int, ctypes.c_int], ctypes.c_int,
-                                self.handle, err_range, axis_num)
-        return bool(result != 0)
-
+        
+        result: ctypes.c_int = self.lib.IMC_SetRecoupRange(self.handle,  ctypes.c_int(range), ctypes.c_int(axis_num))
+        return bool(result.value != 0)
+    
     def get_config(self, axis_num: int) -> Tuple[bool, Dict]:
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-
+        
         if axis_num not in range(0, 16):
             logging.error(f'轴编号超限：{axis_num}')
             return False
-
+        
         steptime = ctypes.c_int()
         pulpolar = ctypes.c_int()
         dirpolar = ctypes.c_int()
@@ -774,30 +737,18 @@ class IMCControl:
         INPena = ctypes.c_int()
         INPpolar = ctypes.c_int()
 
-        result = self._call_imc('IMC_GetConfig',
-                                [ctypes.c_void_p,
-                                 ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int),
-                                 ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_double),
-                                 ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int),
-                                 ctypes.POINTER(ctypes.c_int),
-                                 ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int),
-                                 ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int),
-                                 ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int),
-                                 ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int),
-                                 ctypes.c_int],
-                                ctypes.c_int,
-                                self.handle,
-                                ctypes.byref(steptime), ctypes.byref(pulpolar), ctypes.byref(dirpolar),
-                                ctypes.byref(encpena), ctypes.byref(encpmode), ctypes.byref(encpdir), ctypes.byref(encpfactor),
-                                ctypes.byref(vellim), ctypes.byref(acclim),
-                                ctypes.byref(drvena),
-                                ctypes.byref(plimena), ctypes.byref(plimpolar),
-                                ctypes.byref(nlimena), ctypes.byref(nlimpolar),
-                                ctypes.byref(almena), ctypes.byref(almpolar),
-                                ctypes.byref(INPena), ctypes.byref(INPpolar),
-                                axis_num)
-
-        if result != 0:
+        result: ctypes.c_int = self.lib.IMC_GetConfig(self.handle,
+                                                      ctypes.byref(steptime), ctypes.byref(pulpolar), ctypes.byref(dirpolar),
+                                                      ctypes.byref(encpena), ctypes.byref(encpmode), ctypes.byref(encpdir), ctypes.byref(encpfactor),
+                                                      ctypes.byref(vellim), ctypes.byref(acclim),
+                                                      ctypes.byref(drvena),
+                                                      ctypes.byref(plimena), ctypes.byref(plimpolar),
+                                                      ctypes.byref(nlimena), ctypes.byref(nlimpolar),
+                                                      ctypes.byref(almena), ctypes.byref(almpolar),
+                                                      ctypes.byref(INPena), ctypes.byref(INPpolar),
+                                                      ctypes.c_int(axis_num))
+        
+        if result.value != 0:
             return False, {}
         else:
             return True, {
@@ -820,7 +771,7 @@ class IMCControl:
                 'INPena': bool(INPena.value),
                 'INPpolar': bool(INPpolar.value),
             }
-
+        
     ##########
     # 点到点运动函数
 
@@ -842,26 +793,30 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-
+        
         if axis_num not in range(0, 16):
             logging.error(f'轴编号超限：{axis_num}')
             return False
-
+        
         if not (0 <= accel <= 32767.9999):
             logging.error(f'加速度范围超限：{accel}')
             return False
-
+        
         if not (0 <= decel <= 32767.9999):
             logging.error(f'减速度范围超限：{decel}')
             return False
-        fname = 'IMC_SetAccel' if primary else 'IMC_SetAccel_P'
-        result = self._call_imc(fname, [ctypes.c_void_p, ctypes.c_double, ctypes.c_double, ctypes.c_int], ctypes.c_int,
-                                self.handle, accel, decel, axis_num)
-        return bool(result != 0)
+        
+        result = ctypes.c_int()
+        if primary:
+            result = self.lib.IMC_SetAccel(self.handle, ctypes.c_double(accel), ctypes.c_double(decel), ctypes.c_int(axis_num))
+        else:
+            result = self.lib.IMC_SetAccel_P(self.handle, ctypes.c_double(accel), ctypes.c_double(decel), ctypes.c_int(axis_num))
 
+        return bool(result.value != 0)
+    
     def move_abs(self, axis_num: int, position: int, start_vel: float, target_vel: float, wait: bool, primary: bool = True) -> bool:
         """
         使轴从当前位置移动到指定的目标位置
@@ -886,26 +841,34 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-
+        
         if axis_num not in range(0, 16):
             logging.error(f'轴编号超限：{axis_num}')
             return False
-
+        
         if not (0 <= start_vel <= 32767.9999):
             logging.error(f'速度范围超限：{start_vel}')
             return False
-
+        
         if not (0 <= target_vel <= 32767.9999):
             logging.error(f'速度范围超限：{target_vel}')
             return False
-        fname = 'IMC_MoveAbs' if primary else 'IMC_MoveAbs_P'
-        result = self._call_imc(fname, [ctypes.c_void_p, ctypes.c_long, ctypes.c_double, ctypes.c_double, ctypes.c_int, ctypes.c_int], ctypes.c_int,
-                                self.handle, position, start_vel, target_vel, wait, axis_num)
-        return bool(result != 0)
+        
+        result = ctypes.c_int()
+        if primary:
+            result = self.lib.IMC_MoveAbs(self.handle, ctypes.c_long(position), 
+                                          ctypes.c_double(start_vel), ctypes.c_double(target_vel), 
+                                          ctypes.c_int(wait), ctypes.c_int(axis_num))
+        else:
+            result = self.lib.IMC_MoveAbs_P(self.handle, ctypes.c_long(position), 
+                                            ctypes.c_double(start_vel), ctypes.c_double(target_vel), 
+                                            ctypes.c_int(wait), ctypes.c_int(axis_num))
 
+        return bool(result.value != 0)
+    
     def move_distance(self, axis_num: int, distance: int, start_vel: float, target_vel: float, wait: bool, primary: bool = True) -> bool:
         """
         使轴从当前位置移动到指定的距离
@@ -930,26 +893,34 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-
+        
         if axis_num not in range(0, 16):
             logging.error(f'轴编号超限：{axis_num}')
             return False
-
+        
         if not (0 <= start_vel <= 32767.9999):
             logging.error(f'速度范围超限：{start_vel}')
             return False
-
+        
         if not (0 <= target_vel <= 32767.9999):
             logging.error(f'速度范围超限：{target_vel}')
             return False
-        fname = 'IMC_MoveDist' if primary else 'IMC_MoveDist_P'
-        result = self._call_imc(fname, [ctypes.c_void_p, ctypes.c_long, ctypes.c_double, ctypes.c_double, ctypes.c_int, ctypes.c_int], ctypes.c_int,
-                                self.handle, distance, start_vel, target_vel, wait, axis_num)
-        return bool(result != 0)
+        
+        result = ctypes.c_int()
+        if primary:
+            result = self.lib.IMC_MoveDist(self.handle, ctypes.c_long(distance), 
+                                           ctypes.c_double(start_vel), ctypes.c_double(target_vel), 
+                                           ctypes.c_int(wait), ctypes.c_int(axis_num))
+        else:
+            result = self.lib.IMC_MoveDist_P(self.handle, ctypes.c_long(distance), 
+                                             ctypes.c_double(start_vel), ctypes.c_double(target_vel), 
+                                             ctypes.c_int(wait), ctypes.c_int(axis_num))
 
+        return bool(result.value != 0)
+    
     def set_p2p_vel(self, axis_num: int, target_vel: float, primary: bool = True) -> bool:
         """
         立即改变当前正在执行的点到点运动的运动速度
@@ -966,22 +937,26 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-
+        
         if axis_num not in range(0, 16):
             logging.error(f'轴编号超限：{axis_num}')
             return False
-
+        
         if not (0 <= target_vel <= 32767.9999):
             logging.error(f'速度范围超限：{target_vel}')
             return False
-        fname = 'IMC_P2Pvel' if primary else 'IMC_P2Pvel_P'
-        result = self._call_imc(fname, [ctypes.c_void_p, ctypes.c_double, ctypes.c_int], ctypes.c_int,
-                                self.handle, target_vel, axis_num)
-        return bool(result != 0)
+        
+        result = ctypes.c_int()
+        if primary:
+            result = self.lib.IMC_P2Pvel(self.handle, ctypes.c_double(target_vel), ctypes.c_int(axis_num))
+        else:
+            result = self.lib.IMC_P2Pvel_P(self.handle, ctypes.c_double(target_vel), ctypes.c_int(axis_num))
 
+        return bool(result.value != 0)
+    
     def set_p2p_mode(self, axis_num: int, mode: int = 0, primary: bool = True) -> bool:
         """
         设置点到点运动的模式
@@ -1000,22 +975,26 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-
+        
         if axis_num not in range(0, 16):
             logging.error(f'轴编号超限：{axis_num}')
             return False
-
+        
         if mode not in (0, 1):
             logging.error(f'点到点运动模式错误：{mode}')
             return False
-        fname = 'IMC_SetP2Pmode' if primary else 'IMC_SetP2Pmode_P'
-        result = self._call_imc(fname, [ctypes.c_void_p, ctypes.c_int, ctypes.c_int], ctypes.c_int,
-                                self.handle, mode, axis_num)
-        return bool(result != 0)
+        
+        result = ctypes.c_int()
+        if primary:
+            result = self.lib.IMC_SetP2Pmode(self.handle, ctypes.c_int(mode), ctypes.c_int(axis_num))
+        else:
+            result = self.lib.IMC_SetP2Pmode_P(self.handle, ctypes.c_int(mode), ctypes.c_int(axis_num))
 
+        return bool(result.value != 0)
+    
     def set_p2p_new_pos(self, axis_num: int, position: int, primary: bool = True) -> bool:
         """
         改变点到点运动的目标位置
@@ -1033,18 +1012,22 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-
+        
         if axis_num not in range(0, 16):
             logging.error(f'轴编号超限：{axis_num}')
             return False
-        fname = 'IMC_SetP2PnewPos' if primary else 'IMC_SetP2PnewPos_P'
-        result = self._call_imc(fname, [ctypes.c_void_p, ctypes.c_long, ctypes.c_int], ctypes.c_int,
-                                self.handle, position, axis_num)
-        return bool(result != 0)
+        
+        result = ctypes.c_int()
+        if primary:
+            result = self.lib.IMC_SetP2PnewPos(self.handle, ctypes.c_long(position), ctypes.c_int(axis_num))
+        else:
+            result = self.lib.IMC_SetP2PnewPos_P(self.handle, ctypes.c_long(position), ctypes.c_int(axis_num))
 
+        return bool(result.value != 0)
+    
     def p2p_stop(self, axis_num: int, primary: bool = True) -> bool:
         """
         停止点到点运动
@@ -1057,18 +1040,22 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-
+        
         if axis_num not in range(0, 16):
             logging.error(f'轴编号超限：{axis_num}')
             return False
-        fname = 'IMC_P2Pstop' if primary else 'IMC_P2Pstop_P'
-        result = self._call_imc(fname, [ctypes.c_void_p, ctypes.c_int], ctypes.c_int,
-                                self.handle, axis_num)
-        return bool(result != 0)
+        
+        result = ctypes.c_int()
+        if primary:
+            result = self.lib.IMC_P2Pstop(self.handle, ctypes.c_int(axis_num))
+        else:
+            result = self.lib.IMC_P2Pstop_P(self.handle, ctypes.c_int(axis_num))
 
+        return bool(result.value != 0)
+    
     def set_move_vel(self, axis_num: int, start_vel: float, target_vel: float, primary: bool = True) -> bool:
         """
         使轴立即按指定的速度一直运动，直到速度被改变为止
@@ -1089,26 +1076,30 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-
+        
         if axis_num not in range(0, 16):
             logging.error(f'轴编号超限：{axis_num}')
             return False
-
+        
         if not (-32767.9999 <= start_vel <= 32767.9999):
             logging.error(f'速度范围超限：{start_vel}')
             return False
-
+        
         if not (-32767.9999 <= target_vel <= 32767.9999):
             logging.error(f'速度范围超限：{target_vel}')
             return False
-        fname = 'IMC_MoveVel' if primary else 'IMC_MoveVel_P'
-        result = self._call_imc(fname, [ctypes.c_void_p, ctypes.c_double, ctypes.c_double, ctypes.c_int], ctypes.c_int,
-                                self.handle, start_vel, target_vel, axis_num)
-        return bool(result != 0)
+        
+        result = ctypes.c_int()
+        if primary:
+            result = self.lib.IMC_MoveVel(self.handle, ctypes.c_double(start_vel), ctypes.c_double(target_vel), ctypes.c_int(axis_num))
+        else:
+            result = self.lib.IMC_MoveVel_P(self.handle, ctypes.c_double(start_vel), ctypes.c_double(target_vel), ctypes.c_int(axis_num))
 
+        return bool(result.value != 0)
+    
     ##########
     # 环形轴函数
 
@@ -1137,16 +1128,19 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-
+        
         if output_num not in range(1, 48 + 1):
             logging.error(f'输出端口编号超限：{output_num}')
             return False
-        result = self._call_imc('IMC_SetOut', [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int], ctypes.c_int,
-                                self.handle, output_num, value, fifo.value)
-        return bool(result != 0)
+        
+        result: ctypes.c_int = self.lib.IMC_SetOut(self.handle, ctypes.c_int(output_num), ctypes.c_int(value), ctypes.c_int(fifo.value))
+        return bool(result.value != 0)
+    
+    ##########
+    # 搜索零点函数
 
     def set_home_vel(self, axis_num: int, high_vel: float, low_vel: float) -> bool:
         """
@@ -1164,25 +1158,25 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-
+        
         if axis_num not in range(0, 16):
             logging.error(f'轴编号超限：{axis_num}')
             return False
-
+        
         if not (0 <= high_vel <= 32767.9999):
             logging.error(f'高速搜索速度范围超限：{high_vel}')
             return False
-
+        
         if not (0 <= low_vel <= 32767.9999):
             logging.error(f'低速搜索速度范围超限：{low_vel}')
             return False
-        result = self._call_imc('IMC_SetHomeVel', [ctypes.c_void_p, ctypes.c_double, ctypes.c_double, ctypes.c_int], ctypes.c_int,
-                                self.handle, high_vel, low_vel, axis_num)
-        return bool(result != 0)
-
+        
+        result: ctypes.c_int = self.lib.IMC_SetHomeVel(self.handle, ctypes.c_double(high_vel), ctypes.c_double(low_vel), ctypes.c_int(axis_num))
+        return bool(result.value != 0)
+    
     def set_home_index_polar(self, axis_num: int, polar: float) -> bool:
         """
         设置编码器索引信号的有效极性
@@ -1197,17 +1191,17 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-
+        
         if axis_num not in range(0, 16):
             logging.error(f'轴编号超限：{axis_num}')
             return False
-        result = self._call_imc('IMC_SetHomeIndexPolar', [ctypes.c_void_p, ctypes.c_int, ctypes.c_int], ctypes.c_int,
-                                self.handle, polar, axis_num)
-        return bool(result != 0)
-
+        
+        result: ctypes.c_int = self.lib.IMC_SetHomeIndexPolar(self.handle, ctypes.c_int(polar), ctypes.c_int(axis_num))
+        return bool(result.value != 0)
+    
     def home_switch(self, axis_num: int, check_num: int, dir: int, rise_edge: bool, pos: int, stpos: int, move_vel: float, wait: bool) -> bool:
         """
         使用零点开关搜索零点
@@ -1232,36 +1226,48 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-
+        
         if axis_num not in range(0, 16):
             logging.error(f'轴编号超限：{axis_num}')
             return False
-
+        
         if check_num not in (1, 2, 3):
             logging.error(f'搜零检测方式错误：{check_num}')
             return False
-
+        
         if dir not in (0, 1):
             logging.error(f'搜零方向错误：{dir}')
             return False
-
+        
         if not (0 <= move_vel <= 32767.9999):
             logging.error(f'速度范围超限：{move_vel}')
             return False
-
+        
+        result: ctypes.c_int = ctypes.c_int()
         if check_num == 1:
-            fname = 'IMC_HomeSwitch1'
+            result = self.lib.IMC_HomeSwitch1(self.handle, 
+                                             ctypes.c_int(dir), ctypes.c_int(rise_edge), 
+                                             ctypes.c_long(pos), ctypes.c_long(stpos), 
+                                             ctypes.c_double(move_vel), ctypes.c_int(wait), 
+                                             ctypes.c_int(axis_num))
         elif check_num == 2:
-            fname = 'IMC_HomeSwitch2'
-        else:
-            fname = 'IMC_HomeSwitch3'
-        result = self._call_imc(fname, [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_long, ctypes.c_long, ctypes.c_double, ctypes.c_int, ctypes.c_int], ctypes.c_int,
-                                self.handle, dir, rise_edge, pos, stpos, move_vel, wait, axis_num)
-        return bool(result != 0)
-
+            result = self.lib.IMC_HomeSwitch2(self.handle, 
+                                             ctypes.c_int(dir), ctypes.c_int(rise_edge), 
+                                             ctypes.c_long(pos), ctypes.c_long(stpos), 
+                                             ctypes.c_double(move_vel), ctypes.c_int(wait), 
+                                             ctypes.c_int(axis_num))
+        elif check_num == 3:
+            result = self.lib.IMC_HomeSwitch3(self.handle, 
+                                             ctypes.c_int(dir), ctypes.c_int(rise_edge), 
+                                             ctypes.c_long(pos), ctypes.c_long(stpos), 
+                                             ctypes.c_double(move_vel), ctypes.c_int(wait), 
+                                             ctypes.c_int(axis_num))
+            
+        return bool(result.value != 0)
+    
     def set_pos(self, axis_num: int, position: int) -> bool:
         """
         把该轴的当前位置设定为指定值
@@ -1276,17 +1282,17 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-
+        
         if axis_num not in range(0, 16):
             logging.error(f'轴编号超限：{axis_num}')
             return False
-        result = self._call_imc('IMC_SetPos', [ctypes.c_void_p, ctypes.c_long, ctypes.c_int], ctypes.c_int,
-                                self.handle, position, axis_num)
-        return bool(result != 0)
-
+        
+        result: ctypes.c_int = self.lib.IMC_SetPos(self.handle, ctypes.c_long(position), ctypes.c_int(axis_num))
+        return bool(result.value != 0)
+    
     def home_stop(self, axis_num: int) -> bool:
         """
         立即停止搜零运动
@@ -1297,17 +1303,17 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-
+        
         if axis_num not in range(0, 16):
             logging.error(f'轴编号超限：{axis_num}')
             return False
-        result = self._call_imc('IMC_HomeStop', [ctypes.c_void_p, ctypes.c_int], ctypes.c_int,
-                                self.handle, axis_num)
-        return bool(result != 0)
-
+        
+        result: ctypes.c_int = self.lib.IMC_HomeStop(self.handle, ctypes.c_int(axis_num))
+        return bool(result.value != 0)
+    
     ##########
     # 获得状态函数
 
@@ -1319,19 +1325,13 @@ class IMCControl:
         :return: 轴数量
         :rtype: int
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return 0
-
-        axis_num = self._call_imc(
-            "IMC_GetNaxis",
-            [ctypes.c_void_p],
-            ctypes.c_int,
-            self.handle
-        )
-        # 返回轴数（不依赖于 result 的值）
-        return axis_num
-
+        
+        axis_num: ctypes.c_int = self.lib.IMC_GetAxisNum(self.handle, ctypes.byref(axis_num))
+        return axis_num.value
+    
     def get_encounter_position(self) -> Tuple[bool, List[int]]:
         """
         获得所有轴的机械位置
@@ -1344,19 +1344,18 @@ class IMCControl:
         :return: [是否成功, 位置列表]
         :rtype: Tuple[bool, List[int]]
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False, 0
-
+        
         axis_num: int = self.get_axis_num()
         position: ctypes.Array[ctypes.c_long] = (ctypes.c_long * axis_num)()
-        result = self._call_imc('IMC_GetEncp', [ctypes.c_void_p, ctypes.POINTER(ctypes.c_long), ctypes.c_int], ctypes.c_int,
-                                self.handle, ctypes.byref(position), axis_num)
-        if result != 0:
+        result: ctypes.c_int = self.lib.IMC_GetEncp(self.handle, ctypes.byref(position), ctypes.c_int(axis_num))
+        if result.value != 0:
             return False, []
         else:
-            return True, [position[i] for i in range(axis_num)]
-
+            return True, position.value
+        
     def get_command_position(self) -> Tuple[bool, List[int]]:
         """
         获得所有轴的指令位置
@@ -1367,19 +1366,18 @@ class IMCControl:
         :return: [是否成功, [机械位置]]
         :rtype: Tuple[bool, List[int]]
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False, 0
-
+        
         axis_num: int = self.get_axis_num()
         position: ctypes.Array[ctypes.c_long] = (ctypes.c_long * axis_num)()
-        result = self._call_imc('IMC_GetCurpos', [ctypes.c_void_p, ctypes.POINTER(ctypes.c_long), ctypes.c_int], ctypes.c_int,
-                                self.handle, ctypes.byref(position), axis_num)
-        if result != 0:
+        result: ctypes.c_int = self.lib.IMC_GetCurpos(self.handle, ctypes.byref(position), ctypes.c_int(axis_num))
+        if result.value != 0:
             return False, []
         else:
-            return True, [position[i] for i in range(axis_num)]
-
+            return True, position.value
+        
     def get_axis_moving_status(self) -> Tuple[bool, bool]:
         """
         获得所有轴的运动状态
@@ -1391,19 +1389,18 @@ class IMCControl:
         :return: [是否成功, [运动状态]]
         :rtype: Tuple[bool, bool]
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False, False
-
+                
         axis_num: int = self.get_axis_num()
         moving: ctypes.Array[ctypes.c_short] = (ctypes.c_short * axis_num)()
-        result = self._call_imc('IMC_GetMoving', [ctypes.c_void_p, ctypes.POINTER(ctypes.c_short), ctypes.c_int], ctypes.c_int,
-                                self.handle, ctypes.byref(moving), axis_num)
-        if result != 0:
+        result: ctypes.c_int = self.lib.IMC_GetMoving(self.handle, ctypes.byref(moving), ctypes.c_int(axis_num))
+        if result.value != 0:
             return False, False
         else:
-            return True, [bool(moving[i]) for i in range(axis_num)]
-
+            return True, [bool(moving.value[i]) for i in range(axis_num)]
+        
     def get_axis_all_input_status(self) -> Tuple[bool, List[Dict[str, bool]]]:
         """
         获得所有轴的输入端口状态
@@ -1414,15 +1411,14 @@ class IMCControl:
         :return: [是否成功, {输入端口状态}]
         :rtype: Tuple[bool, List[Dict[str, bool]]]
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False, False
-
+                
         axis_num: int = self.get_axis_num()
-        input_status = (ctypes.c_ushort * 6 * axis_num)()
-        result = self._call_imc('IMC_GetAin', [ctypes.c_void_p, ctypes.POINTER(type(input_status)), ctypes.c_int], ctypes.c_int,
-                                self.handle, ctypes.byref(input_status), axis_num)
-        if result != 0:
+        input_status: ctypes.Array[ctypes.c_short] = (ctypes.c_ushort * axis_num * 6)()
+        result: ctypes.c_int = self.lib.IMC_GetAin(self.handle, ctypes.byref(input_status), ctypes.c_int(axis_num))
+        if result.value != 0:
             return False, []
         else:
             status_List: List[Dict[str, bool]] = []
@@ -1436,7 +1432,7 @@ class IMCControl:
                     'INP': bool(input_status[i][5]),    # 到位
                 })
             return True, status_List
-
+        
     def get_uni_input_status(self) -> Tuple[bool, List[bool]]:
         """
         获得所有通用输入端口的实时状态
@@ -1447,19 +1443,18 @@ class IMCControl:
         :return: [是否成功, 输入端口状态列表]
         :rtype: Tuple[bool, List[bool]]
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False, False
-
+                
         input_num: int = 32
-        input_status: ctypes.Array[ctypes.c_ushort] = (ctypes.c_ushort * input_num)()
-        result = self._call_imc('IMC_GetGin', [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ushort), ctypes.c_int], ctypes.c_int,
-                                self.handle, ctypes.byref(input_status), input_num)
-        if result != 0:
+        input_status: ctypes.Array[ctypes.c_short] = (ctypes.c_ushort * input_num)()
+        result: ctypes.c_int = self.lib.IMC_GetGin(self.handle, ctypes.byref(input_status), ctypes.c_int(input_num))
+        if result.value != 0:
             return False, []
         else:
-            return True, [bool(input_status[i]) for i in range(input_num)]
-
+            return True, [bool(input_status.value[i]) for i in range(input_num)]
+        
     def get_uni_output_status(self) -> Tuple[bool, List[bool]]:
         """
         获得所有输出端口的状态
@@ -1470,18 +1465,18 @@ class IMCControl:
         :return: [是否成功, 输出端口状态列表]
         :rtype: Tuple[bool, List[bool]]
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False, False
-
+                
         output_num: int = 48
-        output_status: ctypes.Array[ctypes.c_ushort] = (ctypes.c_ushort * output_num)()
-        result = self._call_imc('IMC_GetGout', [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ushort)], ctypes.c_int,
-                                self.handle, ctypes.byref(output_status))
-        if result != 0:
+        output_status: ctypes.Array[ctypes.c_short] = (ctypes.c_ushort * output_num)()
+        result: ctypes.c_int = self.lib.IMC_GetGout(self.handle, ctypes.byref(output_status))
+        if result.value != 0:
             return False, []
         else:
-            return True, [bool(output_status[i]) for i in range(output_num)]
+            return True, [bool(output_status.value[i]) for i in range(output_num)]
+        
 
     def get_axis_error_status(self) -> Tuple[bool, List[ErrorCode]]:
         """
@@ -1491,19 +1486,22 @@ class IMCControl:
         :return: [是否成功, [错误代码]]
         :rtype: Tuple[bool, List[ErrorCode]]
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
-            return False, []
-
+            return False, 0
+        
+        if axis_num not in range(0, 16):
+            logging.error(f'轴编号超限：{axis_num}')
+            return False, 0
+        
         axis_num: int = self.get_axis_num()
         error_code: ctypes.Array[ctypes.c_ushort] = (ctypes.c_ushort * axis_num)()
-        result = self._call_imc('IMC_GetErrorReg', [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ushort), ctypes.c_int], ctypes.c_int,
-                                self.handle, ctypes.byref(error_code), axis_num)
-        if result != 0:
-            return False, []
+        result: ctypes.c_int = self.lib.IMC_GetErrorReg(self.handle, ctypes.byref(error_code), ctypes.c_int(axis_num))
+        if result.value != 0:
+            return False, 0
         else:
-            return True, [ErrorCode(error_code[i]) for i in range(axis_num)]
-
+            return True, [ErrorCode(error_code.value[i]) for i in range(axis_num)]
+        
     def get_error_str(self, error_code: ErrorCode) -> str:
         """
         根据错误代码获取错误描述字符串
@@ -1514,13 +1512,13 @@ class IMCControl:
         :return: 错误描述字符串
         :rtype: str
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return ''
-
-        error_str = self._call_imc('IMC_GetErrorStr', [ctypes.c_ushort], ctypes.c_char_p, error_code)
-        return error_str.decode("utf-8").strip()
-
+        
+        error_str: ctypes.c_char_p = self.lib.IMC_GetErrorStr(ctypes.c_ushort(error_code.value))
+        return error_str.value.decode('utf-8').strip()
+    
     ##########
     # 错误清除
 
@@ -1536,17 +1534,17 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-
+        
         if axis_num not in range(0, 16):
             logging.error(f'轴编号超限：{axis_num}')
             return False
-        result = self._call_imc('IMC_ClrError', [ctypes.c_void_p, ctypes.c_int], ctypes.c_int,
-                                self.handle, axis_num)
-        return bool(result != 0)
-
+        
+        result: ctypes.c_int = self.lib.IMC_ClrError(self.handle, ctypes.c_int(axis_num))
+        return bool(result.value != 0)
+    
     ##########
     # 其他功能函数
 
@@ -1565,13 +1563,13 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-        result = self._call_imc('IMC_Emstop', [ctypes.c_void_p, ctypes.c_int], ctypes.c_int,
-                                self.handle, stop)
-        return bool(result != 0)
-
+        
+        result: ctypes.c_int = self.lib.IMC_Emstop(self.handle, ctypes.c_int(stop))
+        return bool(result.value != 0)
+    
     def pause(self, pause: bool = True) -> bool:
         """
         对所有轴立即暂停或解除暂停状态
@@ -1585,13 +1583,13 @@ class IMCControl:
         :return: 是否成功
         :rtype: bool
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return False
-        result = self._call_imc('IMC_Pause', [ctypes.c_void_p, ctypes.c_int], ctypes.c_int,
-                                self.handle, pause)
-        return bool(result != 0)
-
+        
+        result: ctypes.c_int = self.lib.IMC_Pause(self.handle, ctypes.c_int(pause))
+        return bool(result.value != 0)
+    
     def exit_wait(self) -> None:
         """
         退出所有等待状态的运动函数
@@ -1603,12 +1601,11 @@ class IMCControl:
         :return: None
         :rtype: None
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return
-
-        self._call_imc('IMC_ExitWait', [ctypes.c_void_p], None,
-                        self.handle)
+        
+        self.lib.IMC_ExitWait(self.handle)
 
     def get_func_error_str(self) -> str:
         """
@@ -1618,15 +1615,18 @@ class IMCControl:
         :return: 错误描述字符串
         :rtype: str
         """
-        if self.handle == None:
+        if self.handle.value == None:
             logging.error(f'控制卡句柄未打开')
             return ''
-
-        error_str = self._call_imc('IMC_GetFunErrStr', [ctypes.c_void_p], ctypes.c_char_p,
-                                self.handle)
-        return error_str.decode("utf-8").strip()
-
+        
+        error_str: ctypes.c_char_p = self.lib.IMC_GetFunErrStr(self.handle)
+        return error_str.value.decode('utf-8').strip()
+    
 if __name__ == '__main__':
     ctrl = IMCControl('./lib/libIMCnet.so.1.0.0')
     for net in ctrl.find_net_card()[1]:
         print(f'发现网卡：{net}')
+
+
+
+

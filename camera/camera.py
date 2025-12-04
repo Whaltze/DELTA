@@ -9,6 +9,414 @@ from PySide6.QtGui import QImage
 import glob
 import time
 
+class EnhancedShapeDetector:
+    def __init__(self):
+        # 形状模板缓存
+        self.shape_templates = {}
+        self.template_size = (64, 64)
+        self.init_shape_templates()
+        
+        # 形状分类器权重
+        self.feature_weights = {
+            'circularity': 0.3,
+            'rectangularity': 0.25,
+            'solidity': 0.2,
+            'aspect_ratio': 0.15,
+            'contour_approximation': 0.1
+        }
+    
+    def init_shape_templates(self):
+        """初始化标准形状模板"""
+        # 创建标准形状模板
+        templates = {
+            'Circle': self.create_circle_template(),
+            'Square': self.create_square_template(),
+            'Triangle': self.create_triangle_template()
+        }
+        
+        for shape, template in templates.items():
+            # 计算模板特征
+            self.shape_templates[shape] = {
+                'image': template,
+                'features': self.extract_template_features(template),
+                'contour': self.extract_template_contour(template)
+            }
+    
+    def create_circle_template(self):
+        """创建圆形模板"""
+        template = np.zeros(self.template_size, dtype=np.uint8)
+        center = (self.template_size[0]//2, self.template_size[1]//2)
+        radius = min(self.template_size)//3
+        cv2.circle(template, center, radius, 255, -1)
+        return template
+    
+    def create_square_template(self):
+        """创建正方形模板"""
+        template = np.zeros(self.template_size, dtype=np.uint8)
+        size = min(self.template_size)//2
+        start_x = (self.template_size[0] - size)//2
+        start_y = (self.template_size[1] - size)//2
+        cv2.rectangle(template, (start_x, start_y), 
+                      (start_x+size, start_y+size), 255, -1)
+        return template
+    
+    def create_triangle_template(self):
+        """创建三角形模板"""
+        template = np.zeros(self.template_size, dtype=np.uint8)
+        h, w = self.template_size
+        points = np.array([
+            [w//2, h//4],      # 顶点
+            [w//4, 3*h//4],    # 左下
+            [3*w//4, 3*h//4]   # 右下
+        ], dtype=np.int32)
+        cv2.fillPoly(template, [points], 255)
+        return template
+    
+    def extract_template_features(self, template):
+        """提取模板特征"""
+        # 查找轮廓
+        cnts, _ = cv2.findContours(template, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not cnts:
+            return {}
+        
+        contour = cnts[0]
+        area = cv2.contourArea(contour)
+        perimeter = cv2.arcLength(contour, True)
+        
+        features = {}
+        
+        # 圆度
+        if perimeter > 0:
+            features['circularity'] = (4 * np.pi * area) / (perimeter * perimeter)
+        else:
+            features['circularity'] = 0
+        
+        # 最小外接圆
+        (center, radius) = cv2.minEnclosingCircle(contour)
+        min_circle_area = np.pi * radius * radius
+        if min_circle_area > 0:
+            features['enclosing_circle_ratio'] = area / min_circle_area
+        else:
+            features['enclosing_circle_ratio'] = 0
+        
+        # 最小外接矩形
+        rect = cv2.minAreaRect(contour)
+        box = cv2.boxPoints(rect)
+        box_area = cv2.contourArea(box.astype(np.int32))
+        if box_area > 0:
+            features['rectangularity'] = area / box_area
+            width, height = rect[1]
+            features['aspect_ratio'] = max(width, height) / (min(width, height) + 1e-5)
+        else:
+            features['rectangularity'] = 0
+            features['aspect_ratio'] = 1
+        
+        # 多边形拟合
+        epsilon = 0.04 * perimeter
+        approx = cv2.approxPolyDP(contour, epsilon, True)
+        features['vertices'] = len(approx)
+        
+        # 凸包
+        hull = cv2.convexHull(contour)
+        hull_area = cv2.contourArea(hull)
+        if hull_area > 0:
+            features['solidity'] = area / hull_area
+        else:
+            features['solidity'] = 0
+        
+        return features
+    
+    def extract_template_contour(self, template):
+        """提取模板轮廓"""
+        cnts, _ = cv2.findContours(template, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if cnts:
+            return cnts[0]
+        return np.array([])
+    
+    def template_matching_score(self, contour, target_shape):
+        """计算轮廓与模板的匹配分数"""
+        # 提取轮廓区域
+        x, y, w, h = cv2.boundingRect(contour)
+        roi = np.zeros((h, w), dtype=np.uint8)
+        cv2.drawContours(roi, [contour - [x, y]], -1, 255, -1)
+        
+        # 调整大小到模板尺寸
+        roi_resized = cv2.resize(roi, self.template_size)
+        
+        # 模板匹配
+        template = self.shape_templates[target_shape]['image']
+        result = cv2.matchTemplate(roi_resized, template, cv2.TM_CCOEFF_NORMED)
+        score = np.max(result)
+        
+        return score
+    
+    def calculate_contour_similarity(self, contour, target_shape):
+        """计算轮廓相似度"""
+        if target_shape not in self.shape_templates:
+            return 0.0
+        
+        template_contour = self.shape_templates[target_shape]['contour']
+        if len(template_contour) == 0:
+            return 0.0
+        
+        # 使用Hu矩计算相似度
+        moments1 = cv2.moments(contour)
+        moments2 = cv2.moments(template_contour)
+        
+        hu1 = cv2.HuMoments(moments1)
+        hu2 = cv2.HuMoments(moments2)
+        
+        # 计算Hu矩的差异
+        diff = 0
+        for i in range(7):
+            if hu1[i] != 0 and hu2[i] != 0:
+                diff += abs(hu1[i] - hu2[i]) / abs(hu1[i] + hu2[i] + 1e-5)
+        
+        # 转换为相似度分数
+        similarity = 1.0 / (1.0 + diff)
+        return similarity
+    
+    def enhanced_shape_classification(self, contour, area):
+        """增强的形状分类算法"""
+        # 1. 传统特征提取
+        features = self.extract_comprehensive_features(contour, area)
+        
+        # 2. 多维度评分
+        shape_scores = {}
+        
+        for shape_name in ['Circle', 'Square', 'Triangle']:
+            # 传统特征评分
+            traditional_score = self.calculate_traditional_score(features, shape_name)
+            
+            # 模板匹配评分
+            template_score = self.template_matching_score(contour, shape_name)
+            
+            # 轮廓相似度评分
+            contour_score = self.calculate_contour_similarity(contour, shape_name)
+            
+            # 加权综合评分
+            final_score = (traditional_score * 0.4 + 
+                          template_score * 0.4 + 
+                          contour_score * 0.2)
+            
+            shape_scores[shape_name] = final_score
+        
+        # 选择最高分的形状
+        best_shape = max(shape_scores, key=shape_scores.get)
+        confidence = shape_scores[best_shape]
+        
+        # 设置置信度阈值
+        if confidence < 0.6:
+            return False, "Unknown", contour
+        
+        return True, best_shape, contour
+    
+    def extract_comprehensive_features(self, contour, area):
+        """提取综合特征"""
+        features = {}
+        
+        # 基础几何特征
+        perimeter = cv2.arcLength(contour, True)
+        
+        # 圆度特征
+        if perimeter > 0:
+            circularity = (4 * np.pi * area) / (perimeter * perimeter)
+            features['circularity'] = circularity
+        else:
+            features['circularity'] = 0
+        
+        # 最小外接圆特征
+        (center, radius) = cv2.minEnclosingCircle(contour)
+        min_circle_area = np.pi * radius * radius
+        if min_circle_area > 0:
+            features['enclosing_circle_ratio'] = area / min_circle_area
+        else:
+            features['enclosing_circle_ratio'] = 0
+        
+        # 最小外接矩形特征
+        rect = cv2.minAreaRect(contour)
+        box = cv2.boxPoints(rect)
+        box_area = cv2.contourArea(box.astype(np.int32))
+        if box_area > 0:
+            features['rectangularity'] = area / box_area
+            width, height = rect[1]
+            features['aspect_ratio'] = max(width, height) / (min(width, height) + 1e-5)
+        else:
+            features['rectangularity'] = 0
+            features['aspect_ratio'] = 1
+        
+        # 多边形拟合特征
+        epsilon = 0.04 * perimeter
+        approx = cv2.approxPolyDP(contour, epsilon, True)
+        features['vertices'] = len(approx)
+        
+        # 凸包特征
+        hull = cv2.convexHull(contour)
+        hull_area = cv2.contourArea(hull)
+        if hull_area > 0:
+            features['solidity'] = area / hull_area
+        else:
+            features['solidity'] = 0
+        
+        return features
+    
+    def calculate_traditional_score(self, features, shape_name):
+        """基于传统特征的形状评分"""
+        score = 0.0
+        
+        if shape_name == "Circle":
+            # 圆形评分标准
+            circularity = features.get('circularity', 0)
+            enclosing_ratio = features.get('enclosing_circle_ratio', 0)
+            score = (circularity * 0.6 + enclosing_ratio * 0.4)
+            
+        elif shape_name == "Square":
+            # 正方形评分标准
+            rectangularity = features.get('rectangularity', 0)
+            aspect_ratio = features.get('aspect_ratio', 1)
+            solidity = features.get('solidity', 0)
+            
+            # 长宽比接近1的程度
+            aspect_score = 1.0 - abs(aspect_ratio - 1.0)
+            score = (rectangularity * 0.4 + aspect_score * 0.3 + solidity * 0.3)
+            
+        elif shape_name == "Triangle":
+            # 三角形评分标准
+            vertices = features.get('vertices', 0)
+            solidity = features.get('solidity', 0)
+            
+            if vertices == 3:
+                score = solidity * 0.8 + 0.2
+            else:
+                score = 0.0
+        
+        return min(score, 1.0)
+
+
+class EnhancedColorDetector:
+    def __init__(self):
+        # 多颜色空间配置
+        self.color_spaces = {
+            'HSV': self.get_hsv_ranges(),
+            'LAB': self.get_lab_ranges(),
+            'YCrCb': self.get_ycrcb_ranges()
+        }
+        
+        # 光照补偿参数
+        self.illumination_compensation = True
+        self.adaptive_threshold = True
+        
+    def get_hsv_ranges(self):
+        """优化后的HSV颜色范围"""
+        return {
+            'Red': [
+                ([0, 120, 70], [10, 255, 255]),
+                ([170, 120, 70], [180, 255, 255]),
+                ([0, 100, 100], [15, 255, 255]),  # 扩展范围
+                ([165, 100, 100], [180, 255, 255])
+            ],
+            'Yellow': [
+                ([20, 100, 100], [35, 255, 255]),
+                ([15, 80, 80], [40, 255, 255])  # 扩展黄色范围
+            ],
+            'Blue': [
+                ([100, 150, 60], [140, 255, 255]),
+                ([90, 120, 50], [150, 255, 255])  # 扩展蓝色范围
+            ]
+        }
+    
+    def get_lab_ranges(self):
+        """LAB颜色空间范围"""
+        return {
+            'Red': [([0, 130, 130], [255, 255, 255])],
+            'Yellow': [([0, 0, 150], [255, 255, 255])],
+            'Blue': [([0, 0, 0], [255, 130, 130])]
+        }
+    
+    def get_ycrcb_ranges(self):
+        """YCrCb颜色空间范围"""
+        return {
+            'Red': [([0, 150, 0], [255, 255, 150])],
+            'Yellow': [([0, 0, 150], [255, 150, 255])],
+            'Blue': [([0, 0, 0], [255, 150, 150])]
+        }
+    
+    def detect_color_in_space(self, converted, ranges):
+        """在特定颜色空间中检测颜色"""
+        if not ranges:
+            return np.zeros(converted.shape[:2], dtype=np.uint8)
+        
+        combined_mask = np.zeros(converted.shape[:2], dtype=np.uint8)
+        
+        for (lower, upper) in ranges:
+            lower_np = np.array(lower, dtype="uint8")
+            upper_np = np.array(upper, dtype="uint8")
+            mask = cv2.inRange(converted, lower_np, upper_np)
+            combined_mask = cv2.bitwise_or(combined_mask, mask)
+        
+        return combined_mask
+    
+    def enhanced_color_detection(self, frame):
+        """增强的颜色检测算法"""
+        # 1. 光照补偿
+        if self.illumination_compensation:
+            frame = self.apply_illumination_compensation(frame)
+        
+        # 2. 多颜色空间融合检测
+        color_masks = {}
+        
+        for color_name in ['Red', 'Yellow', 'Blue']:
+            combined_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
+            
+            # 在多个颜色空间中检测
+            for space_name, ranges in self.color_spaces.items():
+                if space_name == 'HSV':
+                    converted = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+                elif space_name == 'LAB':
+                    converted = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+                elif space_name == 'YCrCb':
+                    converted = cv2.cvtColor(frame, cv2.COLOR_BGR2YCrCb)
+                
+                space_mask = self.detect_color_in_space(converted, ranges.get(color_name, []))
+                combined_mask = cv2.bitwise_or(combined_mask, space_mask)
+            
+            # 3. 自适应阈值优化
+            if self.adaptive_threshold:
+                combined_mask = self.adaptive_mask_optimization(combined_mask, frame)
+            
+            color_masks[color_name] = combined_mask
+        
+        return color_masks
+    
+    def apply_illumination_compensation(self, frame):
+        """光照补偿"""
+        # 使用CLAHE进行自适应直方图均衡化
+        lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+        l = clahe.apply(l)
+        
+        lab = cv2.merge([l, a, b])
+        return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+    
+    def adaptive_mask_optimization(self, mask, frame):
+        """自适应掩码优化"""
+        # 1. 形态学操作
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+        
+        # 2. 基于边缘的优化
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        edges = cv2.Canny(gray, 50, 150)
+        
+        # 将边缘信息融入掩码
+        mask = cv2.bitwise_and(mask, cv2.bitwise_not(edges))
+        
+        return mask
+
+
 class Camera(QThread):
     sendPicture = Signal(QImage)
     object_detected_robot_coords = Signal(dict)
@@ -43,22 +451,23 @@ class Camera(QThread):
             'Red': [
                 ([0, 120, 70], [10, 255, 255]),  # 红色低范围
                 ([170, 120, 70], [180, 255, 255]),  # 红色高范围
-                ([0, 100, 50], [8, 255, 255]),  # 新增：红色宽松低范围
-                ([172, 100, 50], [180, 255, 255])  # 新增：红色宽松高范围
             ],
             'Yellow': [
                 ([20, 100, 100], [35, 255, 255]),  # 黄色主要范围
-                ([15, 80, 80], [25, 255, 255]),    # 新增：黄色偏橙范围
-                ([25, 80, 80], [40, 255, 255])     # 新增：黄色偏绿范围
             ],
             'Blue': [
                 ([100, 150, 60], [140, 255, 255]),  # 蓝色主要范围
-                ([90, 120, 50], [110, 255, 255]),   # 新增：蓝色偏青范围
-                ([110, 120, 50], [130, 255, 255])   # 新增：蓝色偏紫范围
             ],
-            # 如果需要绿色，可以取消注释并添加多阈值
-            # 'Green': [([40, 70, 70], [80, 255, 255]), ([35, 50, 50], [45, 255, 255])]
         }
+
+        # 新增增强检测器
+        self.shape_detector = EnhancedShapeDetector()
+        self.color_detector = EnhancedColorDetector()
+        
+        # 优化参数
+        self.min_detection_confidence = 0.7
+        self.enable_template_matching = True
+        self.enable_multi_color_space = True
 
     # --- 新增：设置识别目标 ---
     def set_target_filter(self, color, shape):
@@ -124,6 +533,263 @@ class Camera(QThread):
         if self.camera_matrix is None:
             self.camera_matrix = np.array([[1000, 0, 320], [0, 1000, 240], [0, 0, 1]], dtype=np.float32)
             self.dist_coeffs = np.zeros((5, 1), dtype=np.float32)
+
+    def calculate_robot_coordinates(self, cX, cY):
+        """计算机器人坐标"""
+        fx, cx = self.camera_matrix[0, 0], self.camera_matrix[0, 2]
+        fy, cy = self.camera_matrix[1, 1], self.camera_matrix[1, 2]
+        X_cam = (cX - cx) * self.Z_cam_plane / fx
+        Y_cam = (cY - cy) * self.Z_cam_plane / fy
+        return self.transform_to_robot_coords(np.array([X_cam, Y_cam, self.Z_cam_plane]))
+
+    def calculate_color_confidence(self, contour, color_name):
+        """计算颜色置信度"""
+        # 简化实现，基于颜色纯度
+        return 0.8  # 占位符，可根据需要实现更复杂的逻辑
+
+    def calculate_feature_confidence(self, features, shape_name):
+        """计算特征置信度"""
+        # 简化实现
+        return 0.8  # 占位符，可根据需要实现更复杂的逻辑
+
+    def calculate_overall_confidence(self, contour, shape_name, color_name):
+        """计算综合置信度"""
+        # 1. 形状置信度
+        if self.enable_template_matching:
+            template_score = self.shape_detector.template_matching_score(contour, shape_name)
+        else:
+            template_score = 0.5
+        
+        # 2. 颜色置信度（基于颜色纯度）
+        color_confidence = self.calculate_color_confidence(contour, color_name)
+        
+        # 3. 形状特征置信度
+        features = self.shape_detector.extract_comprehensive_features(contour, cv2.contourArea(contour))
+        feature_confidence = self.calculate_feature_confidence(features, shape_name)
+        
+        # 4. 综合评分
+        overall_confidence = (template_score * 0.4 + 
+                            color_confidence * 0.3 + 
+                            feature_confidence * 0.3)
+        
+        return overall_confidence
+
+    def apply_tracking_and_filtering(self, frame, current_detections):
+        """应用追踪和过滤"""
+        # 使用原有的追踪逻辑
+        # --- 多帧匹配与追踪（改进版）---
+        
+        # 1. 标记所有现有追踪器为"未匹配"
+        for trk in self.trackers:
+            trk['matched'] = False
+
+        # 2. 将本帧检测结果与现有追踪器匹配
+        for det in current_detections:
+            matched = False
+            best_match = None
+            best_distance = float('inf')
+            
+            for idx, trk in enumerate(self.trackers):
+                dist = math.hypot(det['center'][0] - trk['center'][0], 
+                                 det['center'][1] - trk['center'][1])
+                
+                # 匹配条件：距离近 + 颜色相同 + 形状相同
+                if (dist < self.MAX_TRACK_DIST and 
+                    det['color'] == trk['color'] and 
+                    det['shape'] == trk['shape'] and
+                    dist < best_distance):
+                    
+                    best_distance = dist
+                    best_match = idx
+            
+            if best_match is not None:
+                # 更新追踪器
+                trk = self.trackers[best_match]
+                trk['center'] = det['center']
+                trk['contour'] = det['contour']
+                # 加权更新机器人坐标（新的检测结果权重更高）
+                trk['robot_pos'] = det['robot_pos'] * 0.4 + trk['robot_pos'] * 0.6
+                # 根据形状置信度调整信心值增加量
+                confidence_boost = 2 * det['confidence']
+                trk['confidence'] = min(trk['confidence'] + confidence_boost, self.MAX_CONFIDENCE)
+                trk['lost_count'] = 0
+                trk['matched'] = True
+                matched = True
+            
+            # 如果是新出现的物体，创建新追踪器
+            if not matched:
+                self.trackers.append({
+                    'center': det['center'],
+                    'color': det['color'],
+                    'shape': det['shape'],
+                    'contour': det['contour'],
+                    'robot_pos': det['robot_pos'],
+                    'confidence': 1 * det['confidence'],  # 初始信心值考虑形状置信度
+                    'lost_count': 0,
+                    'matched': True,
+                    'shape_confidence': det['confidence']
+                })
+
+        # 3. 处理未匹配的追踪器
+        for trk in self.trackers:
+            if not trk['matched']:
+                trk['lost_count'] += 1
+                trk['confidence'] = max(trk['confidence'] - 1, 0)
+
+        # 4. 清理无效追踪器
+        self.trackers = [t for t in self.trackers if t['lost_count'] < self.LOST_THRESHOLD and t['confidence'] > 0]
+
+        # --- 筛选最优结果 ---
+        # 1. 收集所有符合置信度要求的对象
+        valid_candidates = []
+        for trk in self.trackers:
+            if trk['confidence'] >= self.CONFIDENCE_THRESHOLD:
+                # 绘制轮廓
+                cv2.drawContours(frame, [trk['contour']], -1, (0, 255, 0), 2)
+                
+                # 绘制形状标签
+                cX, cY = trk['center']
+                label = f"{trk['color']} {trk['shape']}"
+                cv2.putText(frame, label, (cX - 30, cY - 30), 
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+                
+                # 过滤条件：如果设定了目标，只选择匹配的目标
+                if self.target_color and trk['color'] != self.target_color:
+                    continue
+                if self.target_shape and trk['shape'] != self.target_shape:
+                    continue
+                
+                valid_candidates.append(trk)
+
+        # 2. 如果有候选者，选出最佳目标
+        if valid_candidates:
+            # 按综合评分排序：置信度 * 形状置信度
+            valid_candidates.sort(key=lambda x: x['confidence'] * x.get('shape_confidence', 1.0), reverse=True)
+            
+            # 选择最佳目标
+            best_target = valid_candidates[0]
+            
+            # 绘制特殊标记
+            cX, cY = best_target['center']
+            label = f"TARGET: {best_target['color']} {best_target['shape']}"
+            cv2.putText(frame, label, (cX - 20, cY - 20), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            cv2.circle(frame, (cX, cY), 8, (0, 0, 255), -1)
+            
+            # 绘制目标边界框
+            rect = cv2.minAreaRect(best_target['contour'])
+            box = cv2.boxPoints(rect)
+            box = np.int0(box)
+            cv2.drawContours(frame, [box], 0, (0, 0, 255), 2)
+
+            # 发送信号
+            self.object_detected_robot_coords.emit({
+                'color': best_target['color'],
+                'shape': best_target['shape'],
+                'robot_coords': best_target['robot_pos'].tolist(),
+                'pixel_coords': (cX, cY),
+                'confidence': best_target['confidence'],
+                'shape_confidence': best_target.get('shape_confidence', 1.0)
+            })
+        
+        # 在画面上显示统计信息
+        cv2.putText(frame, f"Trackers: {len(self.trackers)}", (10, 30),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+        cv2.putText(frame, f"Target: {self.target_color} {self.target_shape}", (10, 60),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+        
+        return frame
+
+    def enhanced_preprocessing(self, frame):
+        """增强的预处理"""
+        # 1. 降噪
+        frame = cv2.bilateralFilter(frame, 9, 75, 75)
+        
+        # 2. 锐化
+        kernel = np.array([[-1,-1,-1], [-1,9,-1], [-1,-1,-1]])
+        frame = cv2.filter2D(frame, -1, kernel)
+        
+        # 3. 对比度增强
+        lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+        l = clahe.apply(l)
+        frame = cv2.merge([l, a, b])
+        frame = cv2.cvtColor(frame, cv2.COLOR_LAB2BGR)
+        
+        return frame
+
+    def process_frame(self, frame):
+        """增强的帧处理函数"""
+        # 1. 预处理
+        frame = self.enhanced_preprocessing(frame)
+        
+        # 2. 增强颜色检测
+        if self.enable_multi_color_space:
+            color_masks = self.color_detector.enhanced_color_detection(frame)
+        else:
+            # 使用原有的颜色检测逻辑
+            hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+            color_masks = {}
+            for color_name, ranges in self.color_thresholds.items():
+                combined_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
+                for (lower, upper) in ranges:
+                    lower_np = np.array(lower, dtype="uint8")
+                    upper_np = np.array(upper, dtype="uint8")
+                    mask = cv2.inRange(hsv, lower_np, upper_np)
+                    combined_mask = cv2.bitwise_or(combined_mask, mask)
+                color_masks[color_name] = combined_mask
+        
+        # 3. 形状检测
+        current_detections = []
+        
+        for color_name, mask in color_masks.items():
+            # 查找轮廓
+            cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            for c in cnts:
+                area = cv2.contourArea(c)
+                if area < 500 or area > 50000:
+                    continue
+                
+                # 增强形状分类
+                if self.enable_template_matching:
+                    is_valid, shape_name, approx = self.shape_detector.enhanced_shape_classification(c, area)
+                else:
+                    # 使用原有的形状检测逻辑
+                    is_valid, shape_name, approx = self.strict_shape_check(c, area)
+                
+                if not is_valid:
+                    continue
+                
+                # 计算中心点和机器人坐标
+                M = cv2.moments(c)
+                if M["m00"] == 0:
+                    continue
+                    
+                cX = int(M["m10"] / M["m00"])
+                cY = int(M["m01"] / M["m00"])
+                
+                # 坐标变换
+                robot_pos = self.calculate_robot_coordinates(cX, cY)
+                
+                # 计算综合置信度
+                confidence = self.calculate_overall_confidence(c, shape_name, color_name)
+                
+                current_detections.append({
+                    'center': (cX, cY),
+                    'color': color_name,
+                    'shape': shape_name,
+                    'contour': approx,
+                    'robot_pos': robot_pos,
+                    'confidence': confidence,
+                    'area': area
+                })
+        
+        # 4. 多帧追踪
+        processed_frame = self.apply_tracking_and_filtering(frame, current_detections)
+        
+        return processed_frame
 
     # --- 新增：计算三个点之间的夹角余弦 ---
     def angle_cos(self, p0, p1, p2):
@@ -317,237 +983,6 @@ class Camera(QThread):
         
         return shape != "Unknown", shape, approx
 
-    def process_frame(self, frame):
-        # 1. 增强预处理：自适应直方图均衡化提高对比度
-        # 转换为HSV并均衡V通道
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        h, s, v = cv2.split(hsv)
-        
-        # 对亮度通道进行CLAHE均衡化
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
-        v_eq = clahe.apply(v)
-        
-        # 合并通道并转换回BGR进行后续处理
-        hsv_eq = cv2.merge([h, s, v_eq])
-        frame_eq = cv2.cvtColor(hsv_eq, cv2.COLOR_HSV2BGR)
-        
-        # 双边滤波保留边缘
-        blurred = cv2.bilateralFilter(frame_eq, 9, 75, 75)
-        hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
-        
-        # 本帧检测到的所有候选物体
-        current_detections = []
-
-        # 使用多阈值颜色检测
-        for color_name, ranges in self.color_thresholds.items():
-            # 创建多个掩码并合并
-            masks = []
-            for (lower, upper) in ranges:
-                lower_np = np.array(lower, dtype="uint8")
-                upper_np = np.array(upper, dtype="uint8")
-                mask = cv2.inRange(hsv, lower_np, upper_np)
-                masks.append(mask)
-            
-            # 合并所有阈值范围的掩码
-            if masks:
-                combined_mask = masks[0]
-                for mask in masks[1:]:
-                    combined_mask = cv2.bitwise_or(combined_mask, mask)
-            else:
-                continue
-            
-            # 改进的形态学操作
-            kernel_small = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-            kernel_medium = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-            
-            # 先腐蚀去除小噪点
-            mask_clean = cv2.erode(combined_mask, kernel_small, iterations=1)
-            # 再膨胀连接相近区域
-            mask_clean = cv2.dilate(mask_clean, kernel_medium, iterations=2)
-            # 闭运算填充孔洞
-            mask_clean = cv2.morphologyEx(mask_clean, cv2.MORPH_CLOSE, kernel_medium, iterations=2)
-            
-            # 查找轮廓
-            cnts, _ = cv2.findContours(mask_clean.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            
-            for c in cnts:
-                area = cv2.contourArea(c)
-                # 调整面积过滤范围，适应不同大小的形状
-                if area < 500 or area > 50000: 
-                    continue
-                
-                # 计算轮廓的外接矩形
-                x, y, w, h = cv2.boundingRect(c)
-                aspect_ratio = w / float(h)
-                
-                # 过滤过于细长的轮廓（可能是噪声）
-                if aspect_ratio > 5 or aspect_ratio < 0.2:
-                    continue
-                
-                # 严格形状检查
-                is_valid, shape_name, approx_contour = self.strict_shape_check(c, area)
-                
-                if not is_valid: 
-                    continue
-
-                # 计算重心
-                M = cv2.moments(c)
-                if M["m00"] == 0: 
-                    continue
-                cX = int(M["m10"] / M["m00"])
-                cY = int(M["m01"] / M["m00"])
-
-                # 计算机器人坐标
-                fx, cx = self.camera_matrix[0, 0], self.camera_matrix[0, 2]
-                fy, cy = self.camera_matrix[1, 1], self.camera_matrix[1, 2]
-                X_cam = (cX - cx) * self.Z_cam_plane / fx
-                Y_cam = (cY - cy) * self.Z_cam_plane / fy
-                robot_pos = self.transform_to_robot_coords(np.array([X_cam, Y_cam, self.Z_cam_plane]))
-
-                # 计算形状置信度（基于实心度和圆度）
-                features = self.extract_shape_features(c)
-                shape_confidence = 1.0
-                
-                if shape_name == "Triangle":
-                    shape_confidence = min(features.get('solidity', 0.8) * 1.2, 1.0)
-                elif shape_name == "Circle":
-                    shape_confidence = min(features.get('circularity', 0.7) * 1.3, 1.0)
-                elif shape_name == "Square":
-                    shape_confidence = min(features.get('rectangularity', 0.85) * 1.1, 1.0)
-
-                current_detections.append({
-                    'center': (cX, cY),
-                    'color': color_name,
-                    'shape': shape_name,
-                    'contour': approx_contour,
-                    'robot_pos': robot_pos,
-                    'shape_confidence': shape_confidence,
-                    'area': area
-                })
-
-        # --- 多帧匹配与追踪（改进版）---
-        
-        # 1. 标记所有现有追踪器为"未匹配"
-        for trk in self.trackers:
-            trk['matched'] = False
-
-        # 2. 将本帧检测结果与现有追踪器匹配
-        for det in current_detections:
-            matched = False
-            best_match = None
-            best_distance = float('inf')
-            
-            for idx, trk in enumerate(self.trackers):
-                dist = math.hypot(det['center'][0] - trk['center'][0], 
-                                 det['center'][1] - trk['center'][1])
-                
-                # 匹配条件：距离近 + 颜色相同 + 形状相同
-                if (dist < self.MAX_TRACK_DIST and 
-                    det['color'] == trk['color'] and 
-                    det['shape'] == trk['shape'] and
-                    dist < best_distance):
-                    
-                    best_distance = dist
-                    best_match = idx
-            
-            if best_match is not None:
-                # 更新追踪器
-                trk = self.trackers[best_match]
-                trk['center'] = det['center']
-                trk['contour'] = det['contour']
-                # 加权更新机器人坐标（新的检测结果权重更高）
-                trk['robot_pos'] = det['robot_pos'] * 0.4 + trk['robot_pos'] * 0.6
-                # 根据形状置信度调整信心值增加量
-                confidence_boost = 2 * det['shape_confidence']
-                trk['confidence'] = min(trk['confidence'] + confidence_boost, self.MAX_CONFIDENCE)
-                trk['lost_count'] = 0
-                trk['matched'] = True
-                matched = True
-            
-            # 如果是新出现的物体，创建新追踪器
-            if not matched:
-                self.trackers.append({
-                    'center': det['center'],
-                    'color': det['color'],
-                    'shape': det['shape'],
-                    'contour': det['contour'],
-                    'robot_pos': det['robot_pos'],
-                    'confidence': 1 * det['shape_confidence'],  # 初始信心值考虑形状置信度
-                    'lost_count': 0,
-                    'matched': True,
-                    'shape_confidence': det['shape_confidence']
-                })
-
-        # 3. 处理未匹配的追踪器
-        for trk in self.trackers:
-            if not trk['matched']:
-                trk['lost_count'] += 1
-                trk['confidence'] = max(trk['confidence'] - 1, 0)
-
-        # 4. 清理无效追踪器
-        self.trackers = [t for t in self.trackers if t['lost_count'] < self.LOST_THRESHOLD and t['confidence'] > 0]
-
-        # --- 筛选最优结果 ---
-        # 1. 收集所有符合置信度要求的对象
-        valid_candidates = []
-        for trk in self.trackers:
-            if trk['confidence'] >= self.CONFIDENCE_THRESHOLD:
-                # 绘制轮廓
-                cv2.drawContours(frame, [trk['contour']], -1, (0, 255, 0), 2)
-                
-                # 绘制形状标签
-                cX, cY = trk['center']
-                label = f"{trk['color']} {trk['shape']}"
-                cv2.putText(frame, label, (cX - 30, cY - 30), 
-                          cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
-                
-                # 过滤条件：如果设定了目标，只选择匹配的目标
-                if self.target_color and trk['color'] != self.target_color:
-                    continue
-                if self.target_shape and trk['shape'] != self.target_shape:
-                    continue
-                
-                valid_candidates.append(trk)
-
-        # 2. 如果有候选者，选出最佳目标
-        if valid_candidates:
-            # 按综合评分排序：置信度 * 形状置信度
-            valid_candidates.sort(key=lambda x: x['confidence'] * x.get('shape_confidence', 1.0), reverse=True)
-            
-            # 选择最佳目标
-            best_target = valid_candidates[0]
-            
-            # 绘制特殊标记
-            cX, cY = best_target['center']
-            label = f"TARGET: {best_target['color']} {best_target['shape']}"
-            cv2.putText(frame, label, (cX - 20, cY - 20), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-            cv2.circle(frame, (cX, cY), 8, (0, 0, 255), -1)
-            
-            # 绘制目标边界框
-            rect = cv2.minAreaRect(best_target['contour'])
-            box = cv2.boxPoints(rect)
-            box = np.int0(box)
-            cv2.drawContours(frame, [box], 0, (0, 0, 255), 2)
-
-            # 发送信号
-            self.object_detected_robot_coords.emit({
-                'color': best_target['color'],
-                'shape': best_target['shape'],
-                'robot_coords': best_target['robot_pos'].tolist(),
-                'pixel_coords': (cX, cY),
-                'confidence': best_target['confidence'],
-                'shape_confidence': best_target.get('shape_confidence', 1.0)
-            })
-        
-        # 在画面上显示统计信息
-        cv2.putText(frame, f"Trackers: {len(self.trackers)}", (10, 30),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
-        cv2.putText(frame, f"Target: {self.target_color} {self.target_shape}", (10, 60),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
-        
-        return frame
-
     def run(self):
         # 尝试不同后端，增加稳定性
         cap = cv2.VideoCapture(self.cam_number, cv2.CAP_V4L2)
@@ -558,15 +993,6 @@ class Camera(QThread):
             print(f"Error: Camera {self.cam_number} cannot be opened.")
             return
 
-        # 设置相机参数以获得更好图像质量
-        # cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        # cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        # cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)  # 关闭自动曝光
-        # cap.set(cv2.CAP_PROP_EXPOSURE, -1)      # 手动设置曝光 -1 ~ -13 数值越小,亮度越低
-        # cap.set(cv2.CAP_PROP_BRIGHTNESS, 0)    # 亮度
-        # cap.set(cv2.CAP_PROP_CONTRAST, 50)      # 对比度
-        # cap.set(cv2.CAP_PROP_SATURATION, 30)    # 饱和度
-        
         self.is_running = True
         while self.is_running:
             ret, frame = cap.read()
@@ -585,4 +1011,3 @@ class Camera(QThread):
     def stop(self):
         self.is_running = False
         self.wait()
-        

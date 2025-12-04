@@ -2,6 +2,10 @@
 # core/vision.py
 from PySide6.QtCore import QObject, QTimer, Signal
 import time
+from kinematics.kinematics import DeltaKinematics
+from communication.motion_driver import DeltaMotionController
+from simulator.simulation import DeltaSimulator
+from typing import Optional
 
 class VisionFunctionality(QObject):
     visual_sorting_started = Signal()
@@ -10,10 +14,15 @@ class VisionFunctionality(QObject):
     object_detected = Signal(dict)
     log = Signal(str)
 
-    def __init__(self, ui, motion_controller):
+    def __init__(self, ui, motion_controller, kinematics, main_window=None):
         super().__init__()
         self.ui = ui
-        self.motion_controller = motion_controller # 这里传入的是 DeltaMotionController 实例
+        self.motion_controller = motion_controller
+        self.kinematics = kinematics
+        # 【新增】保存主窗口引用，用于更新UI坐标
+        self.main_window = main_window
+        
+        self.simulator: Optional[DeltaSimulator] = None
         self.robot_mode = 'idle'
         
         self.visual_sorting_origin_z = -220.0 
@@ -114,24 +123,67 @@ class VisionFunctionality(QObject):
                 self.detected_objects_list.append(target_info)
                 self.log.emit(f"添加目标: {color} ({x:.1f}, {y:.1f})")
 
+    def _update_robot_state(self, x, y, z):
+        """【新增】统一的机器人状态更新方法（像写字功能一样）"""
+        try:
+            # 1. 计算对应的滑块位置
+            target_pos = [x, y, z]
+            sliders_z = self.kinematics.inverse_kinematics(target_pos)
+            
+            # 检查可达性
+            if sliders_z is not None:
+                # 2. 更新主窗口的内部状态存储
+                if self.main_window:
+                    self.main_window.current_robot_pos = target_pos
+                
+                # 3. 【新增】同步更新UI上的坐标显示（像寸动功能一样）
+                if self.main_window:
+                    self.main_window.update_ui_coords(target_pos)  # 更新动平台坐标
+                    self.main_window.update_ui_sliders(sliders_z[0], sliders_z[1], sliders_z[2])  # 更新滑块坐标
+                
+                # 4. 更新仿真器状态
+                if self.simulator and self.main_window.ui.simulator_enable_checkbox.isChecked():
+                    self.simulator.update_by_sliders(sliders_z)
+                
+                # 5. 日志记录
+                self.log.emit(f"视觉抓取: 移动到 ({x:.1f}, {y:.1f}, {z:.1f})")
+                
+                return True
+            else:
+                self.log.emit(f"视觉抓取警告: 目标位置 ({x:.1f}, {y:.1f}, {z:.1f}) 不可达")
+                return False
+                
+        except Exception as e:
+            self.log.emit(f"视觉抓取状态更新失败: {str(e)}")
+            return False
+
     def _execute_sorting_action(self, x, y, color_id):
         """执行具体的 吸取->移动->放置 动作"""
         bin_x, bin_y = self.bins.get(color_id, (150, 0))
         ctrl = self.motion_controller
-        
+
         # 1. 移动到物体上方
+        self._update_robot_state(x, y, self.safe_z)
         ctrl.move_to_xyz(x, y, self.safe_z, wait=True)
+
         # 2. 下降
+        self._update_robot_state(x, y, self.visual_sorting_origin_z)
         ctrl.move_to_xyz(x, y, self.visual_sorting_origin_z, wait=True)
-        # 3. 吸气 (打开IO)
-        ctrl.set_digital_output(ctrl.GRIPPER_OUT_PORT, True)
+
+        # 3. 吸气
+        ctrl.set_digital_output(0, True)
         time.sleep(0.5)
+        
         # 4. 抬起
+        self._update_robot_state(x, y, self.safe_z)
         ctrl.move_to_xyz(x, y, self.safe_z, wait=True)
+
         # 5. 移动到垃圾桶上方
+        self._update_robot_state(bin_x, bin_y, self.safe_z)
         ctrl.move_to_xyz(bin_x, bin_y, self.safe_z, wait=True)
-        # 6. 放气 (关闭IO)
-        ctrl.set_digital_output(ctrl.GRIPPER_OUT_PORT, False)
+        
+        # 6. 放气
+        ctrl.set_digital_output(0, False)
 
     def execute_picking_sequence(self):
         if not self.detected_objects_list: return
@@ -144,22 +196,34 @@ class VisionFunctionality(QObject):
             self.log.emit("批量抓取完成")
             self.ui.calibrationStatus.setText("状态: 空闲")
             return
-
+        
         item = self.detected_objects_list[index]
         x, y, z = item['robot_coords']
         
         self.ui.calibrationStatus.setText(f"抓取中 ({index+1}/{len(self.detected_objects_list)})...")
         
-        # 执行单次抓取动作 (这里仅做演示动作：下去再上来)
-        ctrl = self.motion_controller
-        ctrl.move_to_xyz(x, y, self.safe_z, wait=True)
-        ctrl.move_to_xyz(x, y, self.visual_sorting_origin_z, wait=True)
-        ctrl.set_digital_output(ctrl.GRIPPER_OUT_PORT, True)
+        # 1. 移动到物体上方
+        self._update_robot_state(x, y, self.safe_z)
+        self.motion_controller.move_to_xyz(x, y, self.safe_z, wait=True)
+
+        # 2. 下降到物体位置
+        self._update_robot_state(x, y, self.visual_sorting_origin_z)
+        self.motion_controller.move_to_xyz(x, y, self.visual_sorting_origin_z, wait=True)
+
+        # 3. 吸气
+        self.motion_controller.set_digital_output(0, True)
         time.sleep(0.5)
-        ctrl.move_to_xyz(x, y, self.safe_z, wait=True)
-        # 假设放置在固定位置 (200, 0)
-        ctrl.move_to_xyz(200, 0, self.safe_z, wait=True)
-        ctrl.set_digital_output(ctrl.GRIPPER_OUT_PORT, False)
+        
+        # 4. 抬起
+        self._update_robot_state(x, y, self.safe_z)
+        self.motion_controller.move_to_xyz(x, y, self.safe_z, wait=True)
+        
+        # 5. 移动到放置位置
+        self._update_robot_state(200, 0, self.safe_z)
+        self.motion_controller.move_to_xyz(200, 0, self.safe_z, wait=True)
+        
+        # 6. 放气
+        self.motion_controller.set_digital_output(0, False)
         
         # 延时后执行下一个
         QTimer.singleShot(500, lambda: self._send_next_pick_command(index + 1))

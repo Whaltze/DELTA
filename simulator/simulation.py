@@ -4,12 +4,16 @@ import numpy as np
 import pyqtgraph.opengl as gl
 from PySide6.QtWidgets import QWidget, QVBoxLayout
 import math
+from PySide6.QtCore import Signal
 
 class DeltaSimulator(QWidget):
+    pose_changed = Signal(list, list) 
     def __init__(self, kinematics, parent=None):
         super().__init__(parent)
         self.kinematics = kinematics
-        
+
+
+
         # --- 工业配色 ---
         self.COLOR_BG = '#1e1e1e'
         self.COLOR_GRID = (0.3, 0.3, 0.3, 1)
@@ -221,3 +225,19 @@ class DeltaSimulator(QWidget):
             self.slider_items[i].setData(pos=np.array([[tx, ty, sliders_z[i]]]))
             self.rod_lines[i].setData(pos=np.zeros((0, 3))) # 隐藏连杆
             self.joint_points[i].setData(pos=np.zeros((0, 3)))
+
+    def on_slider_value_changed(self):
+            # 获取所有滑块的当前值
+            new_sliders_z = [self.slider_A.value(), self.slider_B.value(), self.slider_C.value()]
+            
+            # 更新仿真图形
+            success = self.update_by_sliders(new_sliders_z)
+
+            # 计算动平台位置
+            if success:
+                platform_pos = self.kinematics.forward_kinematics(new_sliders_z)
+                # 发出信号，携带滑块位置和平台位置
+                self.pose_changed.emit(new_sliders_z, platform_pos)
+            else:
+                # 如果正解失败，平台位置无效，可以发None
+                self.pose_changed.emit(new_sliders_z, None)

@@ -9,7 +9,8 @@ import matplotlib
 
 # 设置中文字体
 try:
-    matplotlib.rcParams['font.family'] = 'simhei'
+    matplotlib.rcParams['font.family'] = 'AR PL UKai CN'
+    # plt.rc("font",family="AR PL UKai CN")
     matplotlib.rcParams['axes.unicode_minus'] = False
 except:
     pass

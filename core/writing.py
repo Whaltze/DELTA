@@ -1,15 +1,20 @@
 # -*- coding: utf-8 -*-
 # core/writing.py
 from PySide6.QtCore import QTimer
+from communication.motion_driver import DeltaMotionController
+from kinematics.kinematics import DeltaKinematics
+from communication.motion_driver import DeltaMotionController
+from simulator.simulation import DeltaSimulator
+from typing import Optional
 
 class WritingFunctionality:
-    def __init__(self, ui, motion_controller, writing_canvas, logger=None, simulator=None):
+    def __init__(self, ui, motion_controller, writing_canvas, logger=None, simulator=None, main_window=None):
         self.ui = ui
-        self.motion_controller = motion_controller # DeltaMotionController
+        self.motion_controller = motion_controller
         self.writing_canvas = writing_canvas
         self.logger = logger or print
+        self.main_window = main_window
         self.simulator = simulator
-
         self.writing_mode = 'idle'
         self.writing_trajectory = []
         self.current_writing_index = 0
@@ -106,7 +111,6 @@ class WritingFunctionality:
         return trajectory
 
     def use_handwriting_trajectory(self):
-        # [核心修复] 必须在此处动态获取 UI 的高度值
         z_write = self.ui.z_height.value()
         z_safe = z_write + 20.0
         area_size = self.ui.writing_area.value()
@@ -201,20 +205,43 @@ class WritingFunctionality:
         self.ui.writing_status.setText("状态: 写字完成")
 
     def send_next_writing_point(self):
+        """【核心修改】发送下一个写字点，同步更新UI坐标显示"""
         if self.current_writing_index < len(self.writing_trajectory):
             point = self.writing_trajectory[self.current_writing_index]
             x, y, z, _ = point
             
-            # [修改] 使用运动控制卡移动
-            success = self.motion_controller.move_to_xyz(x, y, z, wait=False)
+            # 1. 计算对应的滑块位置（像寸动功能一样）
+            target_pos = [x, y, z]
+            sliders_z = self.motion_controller.kinematics.inverse_kinematics(target_pos)
+
+            # 检查可达性
+            if sliders_z is not None:
+                # 2. 使用运动控制卡移动
+                # success = self.motion_controller.move_to_xyz(x, y, z, wait=False)
+                success = True #####################################################################
+
+                if success:
+                    # 3. 【新增】更新主窗口的内部状态存储
+                    if self.main_window:
+                        self.main_window.current_robot_pos = target_pos
+                    
+                    # 4. 【新增】同步更新UI上的坐标显示（像寸动功能一样）
+                    if self.main_window:
+                        self.main_window.update_ui_coords(target_pos)  # 更新动平台坐标
+                        self.main_window.update_ui_sliders(sliders_z[0], sliders_z[1], sliders_z[2])  # 更新滑块坐标
+                    
+                    # 5. 更新仿真器状态
+                    if self.simulator and self.ui.simulator_enable_checkbox.isChecked():
+                        self.simulator.update_by_sliders(sliders_z)
+                    
+                    # 6. 日志记录
+                    self.logger(f"写字: 移动到 ({x:.1f}, {y:.1f}, {z:.1f})")
+                else:
+                    self.logger(f"写字警告: 点 ({x:.1f}, {y:.1f}) 超出范围或控制卡错误")
+            else:
+                self.logger(f"写字警告: 目标位置 ({x:.1f}, {y:.1f}, {z:.1f}) 不可达")
             
-            if not success:
-                self.logger(f"写字警告: 点 ({x:.1f}, {y:.1f}) 超出范围或控制卡错误")
-            
-            # 更新仿真
-            if self.simulator and self.ui.simulator_enable_checkbox.isChecked():
-                self.simulator.update_robot_state([x, y, z])
-                
+            # 更新画布当前点显示
             self.writing_canvas.set_current_point(self.current_writing_index)
             self.current_writing_index += 1
         else:

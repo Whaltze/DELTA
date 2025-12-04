@@ -18,11 +18,13 @@ class TrajectoryVisualizer:
         """
         # 尝试设置中文字体，如果失败则回退
         try:
-            plt.rcParams['font.sans-serif'] = ['SimHei']  # 'SimHei' 是黑体
+            # plt.rc("font",family="AR PL UKai CN") ###修改了这一行
+            plt.rc("font",family="AR PL UKai CN")
+            # plt.rcParams['font.sans-serif'] = ['AR PL UKai CN']  # 'SimHei' 没有
             plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示为方块的问题
         except Exception as e:
             print(f"警告: 设置中文字体失败, 图表标签可能显示不正常。错误: {e}")
-            print("请确保系统中安装了 'SimHei' 字体, 或修改为其他可用的中文字体。")
+            print("请确保系统中安装了 'AR PL UKai CN' 字体, 或修改为其他可用的中文字体。")
 
     # ================== 轨迹可视化 ==================
     def plot_3d_trajectory(self, trajectory_points, title="3D 末端轨迹"):
@@ -147,7 +149,38 @@ class TrajectoryVisualizer:
 
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])
         plt.show()
+        
+    def plot_realtime_trajectory(self, trajectory_points, title="实时轨迹"):
+        """实时显示轨迹"""
+        if not isinstance(trajectory_points, np.ndarray) or trajectory_points.ndim != 2 or trajectory_points.shape[1] != 3:
+            print("错误: 轨迹数据格式不正确")
+            return
 
+        plt.ion()  # 开启交互模式
+        fig = plt.figure(figsize=(10, 8))
+        ax = fig.add_subplot(111, projection="3d")
+        
+        # 初始化轨迹线
+        line, = ax.plot([], [], [], 'b-', linewidth=2)
+        ax.set_xlabel("X轴 (mm)")
+        ax.set_ylabel("Y轴 (mm)")
+        ax.set_zlabel("Z轴 (mm)")
+        ax.set_title(title)
+        
+        # 设置坐标轴范围
+        margin = 50
+        ax.set_xlim(trajectory_points[:, 0].min()-margin, trajectory_points[:, 0].max()+margin)
+        ax.set_ylim(trajectory_points[:, 1].min()-margin, trajectory_points[:, 1].max()+margin)
+        ax.set_zlim(trajectory_points[:, 2].min()-margin, trajectory_points[:, 2].max()+margin)
+        
+        # 实时更新
+        for i in range(len(trajectory_points)):
+            line.set_data(trajectory_points[:i+1, 0], trajectory_points[:i+1, 1])
+            line.set_3d_properties(trajectory_points[:i+1, 2])
+            plt.pause(0.01)
+        
+        plt.ioff()
+        plt.show()
     # ================== 使用示例 (独立运行时) ==================
 if __name__ == "__main__":
     # 仅用于单独测试，本项目中由 core/trajectory_exec 调用

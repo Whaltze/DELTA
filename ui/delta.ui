@@ -757,7 +757,7 @@
       <rect>
        <x>10</x>
        <y>57</y>
-       <width>71</width>
+       <width>81</width>
        <height>31</height>
       </rect>
      </property>
@@ -776,7 +776,7 @@
       <rect>
        <x>95</x>
        <y>57</y>
-       <width>71</width>
+       <width>81</width>
        <height>31</height>
       </rect>
      </property>
@@ -795,7 +795,7 @@
       <rect>
        <x>180</x>
        <y>57</y>
-       <width>71</width>
+       <width>81</width>
        <height>31</height>
       </rect>
      </property>
@@ -806,7 +806,7 @@
       <double>-400.000000000000000</double>
      </property>
      <property name="maximum">
-      <double>-100.000000000000000</double>
+      <double>-300.000000000000000</double>
      </property>
     </widget>
     <widget class="QLabel" name="end_point_label">
@@ -827,7 +827,7 @@
       <rect>
        <x>10</x>
        <y>127</y>
-       <width>71</width>
+       <width>81</width>
        <height>31</height>
       </rect>
      </property>
@@ -846,7 +846,7 @@
       <rect>
        <x>95</x>
        <y>127</y>
-       <width>71</width>
+       <width>81</width>
        <height>31</height>
       </rect>
      </property>
@@ -1032,7 +1032,7 @@
       <rect>
        <x>10</x>
        <y>70</y>
-       <width>71</width>
+       <width>81</width>
        <height>25</height>
       </rect>
      </property>
@@ -1051,7 +1051,7 @@
       <rect>
        <x>100</x>
        <y>70</y>
-       <width>71</width>
+       <width>81</width>
        <height>25</height>
       </rect>
      </property>
@@ -1081,7 +1081,7 @@
       <double>-400.000000000000000</double>
      </property>
      <property name="maximum">
-      <double>-100.000000000000000</double>
+      <double>-300.000000000000000</double>
      </property>
     </widget>
     <widget class="QPushButton" name="solve_ik_button">
@@ -1214,7 +1214,7 @@
    <widget class="QLabel" name="label_10">
     <property name="geometry">
      <rect>
-      <x>30</x>
+      <x>10</x>
       <y>60</y>
       <width>21</width>
       <height>21</height>
@@ -1227,9 +1227,9 @@
    <widget class="QTextBrowser" name="textBrowser_3">
     <property name="geometry">
      <rect>
-      <x>50</x>
+      <x>30</x>
       <y>55</y>
-      <width>61</width>
+      <width>71</width>
       <height>31</height>
      </rect>
     </property>
@@ -1240,7 +1240,7 @@
    <widget class="QLabel" name="label_12">
     <property name="geometry">
      <rect>
-      <x>120</x>
+      <x>110</x>
       <y>60</y>
       <width>21</width>
       <height>21</height>
@@ -1253,9 +1253,9 @@
    <widget class="QTextBrowser" name="textBrowser_4">
     <property name="geometry">
      <rect>
-      <x>140</x>
+      <x>130</x>
       <y>55</y>
-      <width>61</width>
+      <width>71</width>
       <height>31</height>
      </rect>
     </property>
@@ -1281,7 +1281,7 @@
      <rect>
       <x>230</x>
       <y>55</y>
-      <width>61</width>
+      <width>71</width>
       <height>31</height>
      </rect>
     </property>
@@ -1305,7 +1305,7 @@
    <widget class="QLabel" name="label_14">
     <property name="geometry">
      <rect>
-      <x>30</x>
+      <x>10</x>
       <y>140</y>
       <width>21</width>
       <height>21</height>
@@ -1318,9 +1318,9 @@
    <widget class="QTextBrowser" name="textBrowser_6">
     <property name="geometry">
      <rect>
-      <x>50</x>
+      <x>30</x>
       <y>135</y>
-      <width>61</width>
+      <width>71</width>
       <height>31</height>
      </rect>
     </property>
@@ -1331,7 +1331,7 @@
    <widget class="QLabel" name="label_16">
     <property name="geometry">
      <rect>
-      <x>120</x>
+      <x>110</x>
       <y>140</y>
       <width>21</width>
       <height>21</height>
@@ -1344,9 +1344,9 @@
    <widget class="QTextBrowser" name="textBrowser_7">
     <property name="geometry">
      <rect>
-      <x>140</x>
+      <x>130</x>
       <y>135</y>
-      <width>61</width>
+      <width>71</width>
       <height>31</height>
      </rect>
     </property>
@@ -1372,7 +1372,7 @@
      <rect>
       <x>230</x>
       <y>135</y>
-      <width>61</width>
+      <width>71</width>
       <height>31</height>
      </rect>
     </property>
