@@ -16,7 +16,7 @@ class DeltaKinematics:
     - 滑块在立柱上移动，计算结果为滑块相对于Z=0平面的高度。
     """
 
-    def __init__(self, sp, ep, rod_length, z_max=0, z_min=-1000, joint_angle_limit=None):
+    def __init__(self, sp, ep, rod_length, z_max=0, z_min=-337, joint_angle_limit=None):
         """
         参数:
         sp (float): 静平台（立柱）的外接圆半径 (或中心到立柱的水平距离)。
@@ -34,6 +34,14 @@ class DeltaKinematics:
         self.z_max = z_max
         self.z_min = z_min
 
+        # 滑块工作空间限位
+        self.slider_z_min = -337.0  # 滑块下限
+        self.slider_z_max = -30.0   # 滑块上限
+        
+        # 动平台工作空间限位
+        self.platform_z_min = -590.0  # 动平台下限
+        self.platform_z_max = -390.0     # 动平台上限
+        
         # 预计算三根立柱的角度位置 (假设分布为 0, 120, 240 度，或 90, 210, 330)
         # 通常线性Delta立柱位于：Tower A (210 or -30?), Tower B (90), Tower C (330 or -150)
         # 这里为了通用，假设标准分布：
@@ -157,3 +165,41 @@ class DeltaKinematics:
                 return np.array([x, y, z])
                 
         return np.array([x, y, z])
+    def check_limits(self, position=None, sliders=None):
+        """
+        检查位置或滑块是否在限位范围内
+        参数:
+        position (list): 动平台位置 [x, y, z]
+        sliders (list): 滑块位置 [s1, s2, s3]
+        
+        返回:
+        bool: 是否在限位范围内
+        str: 错误信息（如果超出限位）
+        """
+        try:
+            # 检查滑块限位
+            if sliders is not None:
+                for i, slider_z in enumerate(sliders):
+                    if slider_z < self.z_min:
+                        return False, f"滑块{i+1}超出下限: {slider_z:.1f} < {self.z_min}"
+                    if slider_z > self.z_max:
+                        return False, f"滑块{i+1}超出上限: {slider_z:.1f} > {self.z_max}"
+            
+            # 检查工作空间限位
+            if position is not None:
+                x, y, z = position
+                # 计算工作空间半径
+                max_radius = self.delta_r + math.sqrt(self.L**2 - self.z_min**2)
+                radius = math.sqrt(x**2 + y**2)
+                
+                if radius > max_radius:
+                    return False, f"工作空间超出半径: {radius:.1f} > {max_radius:.1f}"
+                if z < self.z_min:
+                    return False, f"Z轴超出下限: {z:.1f} < {self.z_min}"
+                if z > self.z_max:
+                    return False, f"Z轴超出上限: {z:.1f} > {self.z_max}"
+            
+            return True, ""
+        except Exception as e:
+            return False, f"限位检查失败: {str(e)}"
+

@@ -1,16 +1,14 @@
 # -*- coding: utf-8 -*-
 # core/writing.py
 from PySide6.QtCore import QTimer
-from communication.motion_driver import DeltaMotionController
 from kinematics.kinematics import DeltaKinematics
-from communication.motion_driver import DeltaMotionController
 from simulator.simulation import DeltaSimulator
 from typing import Optional
 
 class WritingFunctionality:
-    def __init__(self, ui, motion_controller, writing_canvas, logger=None, simulator=None, main_window=None):
+    def __init__(self, ui, mqtt_handler, writing_canvas, logger=None, simulator=None, main_window=None):
         self.ui = ui
-        self.motion_controller = motion_controller
+        self.mqtt_handler = mqtt_handler
         self.writing_canvas = writing_canvas
         self.logger = logger or print
         self.main_window = main_window
@@ -20,6 +18,7 @@ class WritingFunctionality:
         self.current_writing_index = 0
         self.writing_timer = QTimer()
         self.writing_timer.timeout.connect(self.send_next_writing_point)
+        
     def text_to_trajectory(self, text, font_size=45, area_size=150, z_height=-280):
         # 优化策略：FZU专用逻辑 + 垂直提笔(消除拖尾) + 倒角美化
         trajectory = []
@@ -212,12 +211,13 @@ class WritingFunctionality:
             
             # 1. 计算对应的滑块位置（像寸动功能一样）
             target_pos = [x, y, z]
-            sliders_z = self.motion_controller.kinematics.inverse_kinematics(target_pos)
+            sliders_z = self.mqtt_handler.kinematics.inverse_kinematics(target_pos)
 
             # 检查可达性
             if sliders_z is not None:
-                # 2. 使用运动控制卡移动
-                # success = self.motion_controller.move_to_xyz(x, y, z, wait=False)
+
+                # self.motion_controller.move_to_xyz(x, y, z, wait=False)
+                success = self.mqtt_handler.move_to_xyz(x, y, z, wait=False)
                 success = True #####################################################################
 
                 if success:
@@ -237,7 +237,7 @@ class WritingFunctionality:
                     # 6. 日志记录
                     self.logger(f"写字: 移动到 ({x:.1f}, {y:.1f}, {z:.1f})")
                 else:
-                    self.logger(f"写字警告: 点 ({x:.1f}, {y:.1f}) 超出范围或控制卡错误")
+                    self.logger(f"写字警告: 点 ({x:.1f}, {y:.1f}) 超出范围错误")
             else:
                 self.logger(f"写字警告: 目标位置 ({x:.1f}, {y:.1f}, {z:.1f}) 不可达")
             

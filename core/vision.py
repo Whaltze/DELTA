@@ -3,7 +3,6 @@
 from PySide6.QtCore import QObject, QTimer, Signal
 import time
 from kinematics.kinematics import DeltaKinematics
-from communication.motion_driver import DeltaMotionController
 from simulator.simulation import DeltaSimulator
 from typing import Optional
 
@@ -14,10 +13,10 @@ class VisionFunctionality(QObject):
     object_detected = Signal(dict)
     log = Signal(str)
 
-    def __init__(self, ui, motion_controller, kinematics, main_window=None):
+    def __init__(self, ui, mqtt_handler, kinematics, main_window=None):
         super().__init__()
         self.ui = ui
-        self.motion_controller = motion_controller
+        self.mqtt_handler = mqtt_handler
         self.kinematics = kinematics
         # 【新增】保存主窗口引用，用于更新UI坐标
         self.main_window = main_window
@@ -160,15 +159,15 @@ class VisionFunctionality(QObject):
     def _execute_sorting_action(self, x, y, color_id):
         """执行具体的 吸取->移动->放置 动作"""
         bin_x, bin_y = self.bins.get(color_id, (150, 0))
-        ctrl = self.motion_controller
+        ctrl = self.mqtt_handler
 
         # 1. 移动到物体上方
         self._update_robot_state(x, y, self.safe_z)
-        ctrl.move_to_xyz(x, y, self.safe_z, wait=True)
+        self.mqtt_handler.move_to_xyz(x, y, self.safe_z, wait=True)
 
         # 2. 下降
         self._update_robot_state(x, y, self.visual_sorting_origin_z)
-        ctrl.move_to_xyz(x, y, self.visual_sorting_origin_z, wait=True)
+        self.mqtt_handler.move_to_xyz(x, y, self.visual_sorting_origin_z, wait=True)
 
         # 3. 吸气
         ctrl.set_digital_output(0, True)
@@ -204,26 +203,26 @@ class VisionFunctionality(QObject):
         
         # 1. 移动到物体上方
         self._update_robot_state(x, y, self.safe_z)
-        self.motion_controller.move_to_xyz(x, y, self.safe_z, wait=True)
+        self.mqtt_handler.move_to_xyz(x, y, self.safe_z, wait=True)
 
         # 2. 下降到物体位置
         self._update_robot_state(x, y, self.visual_sorting_origin_z)
-        self.motion_controller.move_to_xyz(x, y, self.visual_sorting_origin_z, wait=True)
+        self.mqtt_handler.move_to_xyz(x, y, self.visual_sorting_origin_z, wait=True)
 
         # 3. 吸气
-        self.motion_controller.set_digital_output(0, True)
+        self.mqtt_handler.set_digital_output(0, True)
         time.sleep(0.5)
         
         # 4. 抬起
         self._update_robot_state(x, y, self.safe_z)
-        self.motion_controller.move_to_xyz(x, y, self.safe_z, wait=True)
+        self.mqtt_handler.move_to_xyz(x, y, self.safe_z, wait=True)
         
         # 5. 移动到放置位置
         self._update_robot_state(200, 0, self.safe_z)
-        self.motion_controller.move_to_xyz(200, 0, self.safe_z, wait=True)
+        self.mqtt_handler.move_to_xyz(200, 0, self.safe_z, wait=True)
         
         # 6. 放气
-        self.motion_controller.set_digital_output(0, False)
+        self.mqtt_handler.set_digital_output(0, False)
         
         # 延时后执行下一个
         QTimer.singleShot(500, lambda: self._send_next_pick_command(index + 1))

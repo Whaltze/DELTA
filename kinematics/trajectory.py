@@ -370,6 +370,6 @@ if __name__ == '__main__':
 
     # --- 贝塞尔曲线轨迹测试 ---
     print("\n--- 贝塞尔曲线轨迹测试 ---")
-    bezier_path = planner.bezier_trajectory(0, 0, -360, 0, 120, -300, show_plot=False)
+    bezier_path = planner.bezier_trajectory(0, 0, -360, 0, 120, -500, show_plot=False)
     print(f"贝塞尔曲线轨迹点数: {len(bezier_path)}")
     print(f"前5个点: {bezier_path[:5]}")

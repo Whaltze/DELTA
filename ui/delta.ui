@@ -48,29 +48,6 @@
      </rect>
     </property>
    </widget>
-   <widget class="QLabel" name="label_2">
-    <property name="geometry">
-     <rect>
-      <x>15</x>
-      <y>60</y>
-      <width>81</width>
-      <height>21</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>波特率</string>
-    </property>
-   </widget>
-   <widget class="QComboBox" name="botrate">
-    <property name="geometry">
-     <rect>
-      <x>90</x>
-      <y>60</y>
-      <width>140</width>
-      <height>22</height>
-     </rect>
-    </property>
-   </widget>
    <widget class="QPushButton" name="pushButton">
     <property name="geometry">
      <rect>
@@ -87,56 +64,78 @@
      <string>连接</string>
     </property>
    </widget>
-   <widget class="QLabel" name="label_8">
-    <property name="geometry">
-     <rect>
-      <x>15</x>
-      <y>95</y>
-      <width>71</width>
-      <height>21</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>串口发送</string>
-    </property>
-   </widget>
    <widget class="QTextBrowser" name="textBrowser_2">
     <property name="geometry">
      <rect>
       <x>15</x>
       <y>125</y>
-      <width>291</width>
-      <height>41</height>
+      <width>295</width>
+      <height>141</height>
      </rect>
     </property>
     <property name="styleSheet">
      <string>background-color: hsla(0, 0.00%, 49.00%, 0.25); border-radius: 5px; border: 1px solid hsla(213, 88.40%, 62.90%, 0.94)</string>
     </property>
    </widget>
-   <widget class="QLabel" name="label_3">
+   <widget class="QLineEdit" name="mqtt_topic_input">
     <property name="geometry">
      <rect>
-      <x>15</x>
-      <y>175</y>
-      <width>100</width>
-      <height>21</height>
+      <x>20</x>
+      <y>60</y>
+      <width>201</width>
+      <height>25</height>
      </rect>
+    </property>
+    <property name="styleSheet">
+     <string notr="true">background-color: hsla(0, 0.00%, 49.00%, 0.25); border-radius: 5px; border: 1px solid hsla(213, 88.40%, 62.90%, 0.94)</string>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="subscribe_button">
+    <property name="geometry">
+     <rect>
+      <x>20</x>
+      <y>90</y>
+      <width>89</width>
+      <height>25</height>
+     </rect>
+    </property>
+    <property name="styleSheet">
+     <string notr="true">background-color: hsla(123, 75.50%, 68.00%, 0.25); border-radius: 3px; border: 3px solid hsla(123, 75.50%, 68.00%, 0.25)</string>
     </property>
     <property name="text">
-     <string>串口接收</string>
+     <string>订阅话题</string>
     </property>
    </widget>
-   <widget class="QTextBrowser" name="textBrowser">
+   <widget class="QPushButton" name="stop_subscription_button">
     <property name="geometry">
      <rect>
-      <x>15</x>
-      <y>205</y>
-      <width>291</width>
-      <height>61</height>
+      <x>120</x>
+      <y>90</y>
+      <width>89</width>
+      <height>25</height>
      </rect>
     </property>
     <property name="styleSheet">
-     <string>background-color: hsla(0, 0.00%, 49.00%, 0.25); border-radius: 5px; border: 1px solid hsla(213, 88.40%, 62.90%, 0.94)</string>
+     <string notr="true">background-color: hsla(14, 83.40%, 59.80%, 0.25); border-radius: 3px; border: 3px solid hsla(14, 83.40%, 59.80%, 0.25)</string>
+    </property>
+    <property name="text">
+     <string>停止订阅</string>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="clear_mqtt_messages_button">
+    <property name="geometry">
+     <rect>
+      <x>220</x>
+      <y>90</y>
+      <width>89</width>
+      <height>25</height>
+     </rect>
+    </property>
+    <property name="styleSheet">
+     <string notr="true">background-color: hsla(0, 0.00%, 49.00%, 0.25); border-radius: 5px; border: 1px solid hsla(213, 88.40%, 62.90%, 0.94)</string>
+    </property>
+    <property name="text">
+     <string>清空消息</string>
     </property>
    </widget>
   </widget>
@@ -218,7 +217,7 @@
      <rect>
       <x>15</x>
       <y>110</y>
-      <width>290</width>
+      <width>291</width>
       <height>211</height>
      </rect>
     </property>
@@ -301,7 +300,7 @@
     </rect>
    </property>
    <property name="title">
-    <string>手眼标定 (相机 -&amp;gt; 动平台)</string>
+    <string>手眼标定 (相机 -- 动平台)</string>
    </property>
    <widget class="QLabel" name="label_trans_x">
     <property name="geometry">
@@ -650,7 +649,7 @@
      <property name="geometry">
       <rect>
        <x>50</x>
-       <y>41</y>
+       <y>42</y>
        <width>31</width>
        <height>31</height>
       </rect>
@@ -665,8 +664,8 @@
     <widget class="QPushButton" name="pushButton_10">
      <property name="geometry">
       <rect>
-       <x>90</x>
-       <y>41</y>
+       <x>100</x>
+       <y>42</y>
        <width>31</width>
        <height>31</height>
       </rect>
@@ -681,8 +680,8 @@
     <widget class="QPushButton" name="pushButton_11">
      <property name="geometry">
       <rect>
-       <x>130</x>
-       <y>41</y>
+       <x>140</x>
+       <y>42</y>
        <width>31</width>
        <height>31</height>
       </rect>
@@ -697,8 +696,8 @@
     <widget class="QPushButton" name="pushButton_12">
      <property name="geometry">
       <rect>
-       <x>170</x>
-       <y>41</y>
+       <x>190</x>
+       <y>42</y>
        <width>31</width>
        <height>31</height>
       </rect>
@@ -713,8 +712,8 @@
     <widget class="QPushButton" name="pushButton_13">
      <property name="geometry">
       <rect>
-       <x>210</x>
-       <y>41</y>
+       <x>230</x>
+       <y>42</y>
        <width>31</width>
        <height>31</height>
       </rect>
@@ -803,10 +802,13 @@
       <string> mm</string>
      </property>
      <property name="minimum">
-      <double>-400.000000000000000</double>
+      <double>-99999.000000000000000</double>
      </property>
      <property name="maximum">
-      <double>-300.000000000000000</double>
+      <double>999999.000000000000000</double>
+     </property>
+     <property name="value">
+      <double>-410.000000000000000</double>
      </property>
     </widget>
     <widget class="QLabel" name="end_point_label">
@@ -865,7 +867,7 @@
       <rect>
        <x>180</x>
        <y>127</y>
-       <width>71</width>
+       <width>81</width>
        <height>31</height>
       </rect>
      </property>
@@ -873,10 +875,13 @@
       <string> mm</string>
      </property>
      <property name="minimum">
-      <double>-400.000000000000000</double>
+      <double>-99999.000000000000000</double>
      </property>
      <property name="maximum">
-      <double>-100.000000000000000</double>
+      <double>99999.000000000000000</double>
+     </property>
+     <property name="value">
+      <double>-410.000000000000000</double>
      </property>
     </widget>
     <widget class="QPushButton" name="run_jog_sequence_button">
@@ -1078,10 +1083,10 @@
       <string> mm</string>
      </property>
      <property name="minimum">
-      <double>-400.000000000000000</double>
+      <double>-610.000000000000000</double>
      </property>
      <property name="maximum">
-      <double>-300.000000000000000</double>
+      <double>-410.000000000000000</double>
      </property>
     </widget>
     <widget class="QPushButton" name="solve_ik_button">
@@ -1148,7 +1153,7 @@
      <rect>
       <x>20</x>
       <y>35</y>
-      <width>161</width>
+      <width>131</width>
       <height>20</height>
      </rect>
     </property>
@@ -1183,6 +1188,22 @@
     </property>
     <property name="styleSheet">
      <string notr="true">background-color: hsla(0, 0.00%, 49.00%, 0.25); border-radius: 5px; border: 1px solid hsla(213, 88.40%, 62.90%, 0.94)</string>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="pushButton_7">
+    <property name="geometry">
+     <rect>
+      <x>160</x>
+      <y>30</y>
+      <width>101</width>
+      <height>31</height>
+     </rect>
+    </property>
+    <property name="styleSheet">
+     <string>background-color: hsla(0, 0.00%, 49.00%, 0.25); border-radius: 5px; border: 1px solid hsla(213, 88.40%, 62.90%, 0.94)</string>
+    </property>
+    <property name="text">
+     <string>打开气泵</string>
     </property>
    </widget>
   </widget>
@@ -1407,28 +1428,15 @@
     </rect>
    </property>
    <property name="title">
-    <string>写字功能</string>
+    <string>终端输出</string>
    </property>
-   <widget class="QLabel" name="terminal_label">
-    <property name="geometry">
-     <rect>
-      <x>10</x>
-      <y>25</y>
-      <width>80</width>
-      <height>20</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>终端输出:</string>
-    </property>
-   </widget>
    <widget class="QTextBrowser" name="terminal_output">
     <property name="geometry">
      <rect>
       <x>10</x>
-      <y>50</y>
+      <y>29</y>
       <width>341</width>
-      <height>180</height>
+      <height>201</height>
      </rect>
     </property>
     <property name="styleSheet">
@@ -1502,6 +1510,9 @@
     <property name="text">
      <string>FZU</string>
     </property>
+    <property name="alignment">
+     <set>Qt::AlignCenter</set>
+    </property>
    </widget>
    <widget class="QLabel" name="font_size_label">
     <property name="geometry">
@@ -1524,6 +1535,9 @@
       <width>101</width>
       <height>25</height>
      </rect>
+    </property>
+    <property name="alignment">
+     <set>Qt::AlignCenter</set>
     </property>
     <property name="minimum">
      <number>10</number>
@@ -1557,6 +1571,9 @@
       <height>25</height>
      </rect>
     </property>
+    <property name="alignment">
+     <set>Qt::AlignCenter</set>
+    </property>
     <property name="minimum">
      <number>50</number>
     </property>
@@ -1589,17 +1606,20 @@
       <height>25</height>
      </rect>
     </property>
+    <property name="alignment">
+     <set>Qt::AlignCenter</set>
+    </property>
     <property name="minimum">
-     <double>-400.000000000000000</double>
+     <double>-610.000000000000000</double>
     </property>
     <property name="maximum">
-     <double>-100.000000000000000</double>
+     <double>-410.000000000000000</double>
     </property>
     <property name="singleStep">
      <double>5.000000000000000</double>
     </property>
     <property name="value">
-     <double>-280.000000000000000</double>
+     <double>-500.000000000000000</double>
     </property>
    </widget>
    <widget class="QLabel" name="writing_speed_label">
@@ -1623,6 +1643,9 @@
       <width>70</width>
       <height>25</height>
      </rect>
+    </property>
+    <property name="alignment">
+     <set>Qt::AlignCenter</set>
     </property>
     <property name="minimum">
      <number>1</number>
