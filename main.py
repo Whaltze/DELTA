@@ -41,19 +41,20 @@ class MainWindow(QMainWindow):
             # 【新增】MQTT 模块初始化
             # 请将下面的 IP 修改为你 Windows 下位机的 IP 地址，或者 MQTT Broker 的地址
             # self.mqtt_handler = DeltaMqttHandler(broker_ip="192.168.174.99", port=1883)
-            self.mqtt_handler = DeltaMqttHandler(broker_ip="192.168.174.99", port=1883)
+            self.mqtt_handler = DeltaMqttHandler(broker_ip="192.168.29.99", port=1883)
             # self.mqtt_handler.set_kinematics(self.kinematics)
 
-            self.mqtt_handler.log_signal.connect(self.log_terminal)
+            # self.mqtt_handler.log_signal.connect(self.log_terminal)
             self.mqtt_handler.connection_state_changed.connect(self.update_connection_status)
             self.mqtt_handler.connect_broker()
 
             # 尝试自动连接 MQTT (可选)
             # 这里的 IP 应该改为你实际的 Broker IP
-            self.mqtt_handler.connect_broker("127.0.0.1", 1883)
+            self.mqtt_handler.connect_broker("192.168.29.99", 1883)
 
+            self.original_emergency_button_style = self.ui.pushButton_2.styleSheet() # 初始化急停样式
 
-
+            self.emergency_stopped = False  # 添加急停状态标志
 
             # 1. 基础组件
             self.camera_thread = Camera()
@@ -220,11 +221,11 @@ class MainWindow(QMainWindow):
             )
             
             # 连接信号
-            self.motor_debug_module.log_signal.connect(self.log_terminal)
+            # self.motor_debug_module.log_signal.connect(self.log_terminal)
             self.motor_debug_module.ui_update_signal.connect(self.handle_debug_ui_update)
             self.motor_debug_module.simulator_update_signal.connect(self.handle_motor_simulator_update)
             
-            self.inch_move_module.log_signal.connect(self.log_terminal)
+            # self.inch_move_module.log_signal.connect(self.log_terminal)
             self.inch_move_module.ui_update_signal.connect(self.handle_debug_ui_update)
             self.inch_move_module.simulator_update_signal.connect(self.handle_inch_simulator_update)
             
@@ -335,24 +336,117 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.log_terminal(f"滑块移动操作失败: {str(e)}")
             return False
-
     def handle_emergency(self):
-        """急停"""
+        """急停/解除急停切换功能（优化版）"""
         try:
-            self.log_terminal("!!! 急停 !!!")
+            # 切换急停状态
+            self.emergency_stopped = not self.emergency_stopped
             
-            # 通过模块执行急停
-            self.motor_debug_module.emergency_stop()
-            self.inch_move_module.emergency_stop()
-            
-            # 原有功能
-            self.simulator_window.set_emergency_state(True)
-            if hasattr(self, 'sim_timer'): 
-                self.sim_timer.stop()
-            self.writing_func.writing_timer.stop()
-            self.log_terminal("急停已执行")
+            if self.emergency_stopped:
+                # === 急停处理 ===
+                # self.log_terminal("!!! 急停 !!!")
+                
+                # 停止所有运动模块
+                if hasattr(self, 'motor_debug_module'):
+                    self.motor_debug_module.emergency_stop()
+                if hasattr(self, 'inch_move_module'):
+                    self.inch_move_module.emergency_stop()
+                if hasattr(self, 'trajectory_curves'):
+                    self.trajectory_curves.stop_execution()
+                if hasattr(self, 'p2p_move_module'):
+                    self.p2p_move_module.emergency_stop()
+                if hasattr(self, 'writing_func'):
+                    self.writing_func.stop_writing()
+                
+                # 停止仿真器
+                if hasattr(self, 'simulator_window'):
+                    self.simulator_window.set_emergency_state(True)
+                
+                # 停止所有定时器
+                if hasattr(self, 'sim_timer'): 
+                    self.sim_timer.stop()
+                
+                # 发送急停指令
+                if self.mqtt_handler and self.mqtt_handler.is_connected:
+                    self.mqtt_handler.send_emergency_stop(True)
+                
+                # 更新UI状态
+                self.ui.pushButton_2.setText("解除")
+                self.ui.pushButton_2.setStyleSheet("""
+                    QPushButton {
+                        background-color: hsla(123, 75.50%, 68.00%, 0.25);
+                        color: white;
+                        border-radius: 3px;
+                        border: 3px solid hsla(123, 75.50%, 68.00%, 0.25);
+                    }
+                """)
+                
+                # 禁用轨迹相关按钮
+                self._set_trajectory_buttons_enabled(False)
+                
+                self.log_terminal("急停已激活 - 所有运动已停止")
+                
+            else:
+                # === 解除急停处理 ===
+                # self.log_terminal(">>> 解除急停 <<<")
+                
+                # 解除仿真器急停
+                if hasattr(self, 'simulator_window'):
+                    self.simulator_window.set_emergency_state(False)
+                
+                # 发送解除急停指令
+                if self.mqtt_handler and self.mqtt_handler.is_connected:
+                    self.mqtt_handler.send_emergency_stop(False)
+                
+                # 恢复UI状态
+                self.ui.pushButton_2.setText("急停")
+                self.ui.pushButton_2.setStyleSheet("""
+                    QPushButton {
+                        background-color: hsla(14, 83.40%, 59.80%, 0.25);
+                        color: white;
+                        border-radius: 3px;
+                        border: 3px solid hsla(14, 83.40%, 59.80%, 0.25);
+                    }
+                """)
+                
+                # 恢复轨迹相关按钮
+                self._set_trajectory_buttons_enabled(True)
+                
+                # 恢复状态更新定时器
+                if hasattr(self, 'status_timer'):
+                    self.status_timer.start(1000)
+                
+                self.log_terminal("急停已解除 - 系统恢复正常")
+                
         except Exception as e:
-            self.log_terminal(f"急停失败: {str(e)}")
+            self.log_terminal(f"急停操作失败: {str(e)}")
+            traceback.print_exc()
+
+    def _set_trajectory_buttons_enabled(self, enabled):
+        """统一设置轨迹相关按钮的启用状态"""
+        try:
+            # 轨迹执行按钮
+            if hasattr(self.ui, 'pushButton_6'):  # 运行曲线
+                self.ui.pushButton_6.setEnabled(enabled)
+            
+            # 写字相关按钮
+            if hasattr(self.ui, 'start_writing_button'):
+                self.ui.start_writing_button.setEnabled(enabled)
+            if hasattr(self.ui, 'preview_button'):
+                self.ui.preview_button.setEnabled(enabled)
+                
+            # 点动运行按钮
+            if hasattr(self.ui, 'run_jog_sequence_button'):
+                self.ui.run_jog_sequence_button.setEnabled(enabled)
+                
+            # 视觉相关按钮
+            if hasattr(self.ui, 'pushButton_4'):  # 视觉分类
+                self.ui.pushButton_4.setEnabled(enabled)
+            if hasattr(self.ui, 'pushButton_5'):  # 视觉拾取
+                self.ui.pushButton_5.setEnabled(enabled)
+                
+        except Exception as e:
+            self.log_terminal(f"设置按钮状态失败: {str(e)}")
 
     # ================== 其他方法 ==================
     def handle_connection_click(self):
@@ -361,7 +455,7 @@ class MainWindow(QMainWindow):
             self.ui.pushButton.setText("连接")
         else:
             # 获取选择的设备ID
-            imcid = int(self.ui.device_selector.currentText())
+            imcid = 0
             self.mqtt_handler.imcid = imcid
             
             # 更新话题
@@ -369,7 +463,7 @@ class MainWindow(QMainWindow):
             self.mqtt_handler.TOPIC_EMERGENCY_STOP = f"card/{imcid}/emergency_stop"
             # ... 更新其他话题
             
-            self.mqtt_handler.connect_broker("192.168.174.99", 1883)
+            self.mqtt_handler.connect_broker("192.168.29.99", 1883)
             self.ui.pushButton.setText("断开")
             
     def init_connection_ui(self):
@@ -377,13 +471,13 @@ class MainWindow(QMainWindow):
         try:
             # 修改UI标签
             self.ui.label.setText("IP选择") 
-            self.ui.label_2.setVisible(False)  # 隐藏波特率标签
-            self.ui.botrate.setVisible(False)  # 隐藏波特率下拉框
+            # self.ui.label_2.setVisible(False)  # 隐藏波特率标签
+            # self.ui.botrate.setVisible(False)  # 隐藏波特率下拉框
 
             # 添加多个IP地址选项
             ip_list = [
+                "192.168.29.99",
                 "192.168.174.99",  # 下位机IP
-                "192.168.174.50",   # 备用IP
                 "127.0.0.1",       # 本地测试
                 "192.168.0.100"    # 其他网络
             ]
@@ -455,6 +549,8 @@ class MainWindow(QMainWindow):
             self.vision_func.execute_picking_sequence_signal.connect(self.execute_vision_pick_simulation)
             
             # 机器人控制
+
+            self.ui.pushButton_2.clicked.disconnect()  # 先断开现有连接
             self.ui.pushButton_2.clicked.connect(self.handle_emergency)
             self.ui.pushButton_3.clicked.connect(self.handle_reset)
             self.ui.solve_ik_button.clicked.connect(self.on_solve_ik)
@@ -462,7 +558,7 @@ class MainWindow(QMainWindow):
             
             # 电机调试 (单轴移动)
             # 修改电机调试按钮的连接，将脉冲改为毫米
-            step_mm = 30.0  # 10毫米步长
+            step_mm = 10.0  # 10毫米步长
             self.ui.pushButton_14.clicked.connect(lambda: self.handle_motor_move(0, step_mm))
             self.ui.pushButton_15.clicked.connect(lambda: self.handle_motor_move(0, -step_mm))
             self.ui.pushButton_16.clicked.connect(lambda: self.handle_motor_move(1, step_mm))
@@ -470,7 +566,7 @@ class MainWindow(QMainWindow):
             self.ui.pushButton_18.clicked.connect(lambda: self.handle_motor_move(2, step_mm))
             self.ui.pushButton_19.clicked.connect(lambda: self.handle_motor_move(2, -step_mm))
 
-            micro_step = 1.0  # 微小步长1mm
+            micro_step = 10.0  # 微小步长1mm
             self.ui.pushButton_8.clicked.connect(lambda: self.handle_micro_inch_move(0, micro_step))
             self.ui.pushButton_9.clicked.connect(lambda: self.handle_micro_inch_move(0, -micro_step))
             self.ui.pushButton_10.clicked.connect(lambda: self.handle_micro_inch_move(1, micro_step))
@@ -659,7 +755,7 @@ class MainWindow(QMainWindow):
             if reset_sliders is None:
                 self.log_terminal("错误：复位位置不可达，尝试调整Z轴高度")
                 # 尝试更高位置
-                reset_pos = [0.0, 0.0, -400.0]
+                reset_pos = [0.0, 0.0, -420.0]
                 reset_sliders = self.kinematics.inverse_kinematics(reset_pos)
                 if reset_sliders is None:
                     self.log_terminal("错误：调整后位置仍不可达")
@@ -670,6 +766,8 @@ class MainWindow(QMainWindow):
             if self.mqtt_handler.is_connected:
                 # 连接到实体机器人，使用回零话题
                 self._execute_homing_sequence()
+                # print("")
+
             else:
                 # 未连接，使用仿真平滑复位
                 self._execute_simulation_reset(reset_pos, reset_sliders)
@@ -680,57 +778,42 @@ class MainWindow(QMainWindow):
             self._reset_button_state()
 
     def _execute_homing_sequence(self):
-        """执行实体机器人回零序列"""
+        """执行实体机器人回零序列（修复UI更新版）"""
+        
+        # 设置回零参数（根据控制卡要求固定值）
+        # 参数说明：
+        # dir: 回零方向，0为正方向搜零（向上）  # 正方向搜零（向上）
+        # rise_edge: 指定检测原点开关的边沿；零：下降沿；非零：上升沿
+        # switch_pos: 零点开关位置对应脉冲数（滑块位置）
+        # stop_pos: 查找到零点后要移动到的脉冲数（最终位置）
+        # high_vel: 回零运动的最高速度
+        # low_vel: 回零运动的最低速度
+        # stop_vel: 到达最终位置后要保持的速度
+
         try:
-            self.log_terminal("开始实体机器人回零...")
+            self.log_terminal("=== 开始实体机器人回零程序 ===")
             
-            # 设置回零参数（根据控制卡要求固定值）
-            # 参数说明：
-            # dir: 回零方向，0为正方向搜零（向上）
-            # rise_edge: 指定检测原点开关的边沿；零：下降沿；非零：上升沿
-            # switch_pos: 零点开关位置对应脉冲数（滑块位置）
-            # stop_pos: 查找到零点后要移动到的脉冲数（最终位置）
-            # high_vel: 回零运动的最高速度
-            # low_vel: 回零运动的最低速度
-            # stop_vel: 到达最终位置后要保持的速度
+            # 1. 停止所有当前任务
+            if hasattr(self, 'writing_func'):
+                self.writing_func.stop_writing()
             
-            # 假设每个滑块的回零参数（需要根据实际硬件调整）
-            homing_params = [
-                {
-                    "dir": 0,           # 正方向搜零（向上）
-                    "rise_edge": 0,     # 下降沿
-                    "switch_pos": -337, # 零点开关位置（滑块下限）
-                    "stop_pos": -300,   # 回零后停止位置（安全位置）
-                    "high_vel": 5.0,    # 高速搜索速度
-                    "low_vel": 1.0,     # 低速搜索速度
-                    "stop_vel": 0.0     # 停止速度
-                },
-                {
-                    "dir": 0,
-                    "rise_edge": 0,
-                    "switch_pos": -337,
-                    "stop_pos": -300,
-                    "high_vel": 5.0,
-                    "low_vel": 1.0,
-                    "stop_vel": 0.0
-                },
-                {
-                    "dir": 0,
-                    "rise_edge": 0,
-                    "switch_pos": -337,
-                    "stop_pos": -300,
-                    "high_vel": 5.0,
-                    "low_vel": 1.0,
-                    "stop_vel": 0.0
-                }
-            ]
+            # 2. 回零参数配置
+            base_params = {
+                "dir": 1,           # 1: 负方向
+                "rise_edge": 0,     # 0: 下降沿
+                "switch_pos": 0,    
+                "stop_pos": 2000,   # 回零后偏移量（脉冲）
+                "high_vel": 2.0,    
+                "low_vel": 1.0,     
+                "stop_vel": 0.0     
+            }
             
-            # 逐个轴执行回零
-            all_success = True
+            homing_params = [base_params.copy() for _ in range(3)]
+            
+            # 3. 逐个发送回零指令
+            all_sent_success = True
             for axis_idx in range(3):
                 params = homing_params[axis_idx]
-                self.log_terminal(f"轴{axis_idx+1}开始回零...")
-                
                 success = self.mqtt_handler.send_home_command(
                     axis=axis_idx,
                     dir=params["dir"],
@@ -741,42 +824,72 @@ class MainWindow(QMainWindow):
                     low_vel=params["low_vel"],
                     stop_vel=params["stop_vel"]
                 )
+                if not success:
+                    all_sent_success = False
+                time.sleep(0.05) 
+            
+            if not all_sent_success:
+                self.log_terminal("回零指令发送不完整")
+                self._reset_button_state()
+                return
+
+            self.log_terminal("指令已发送，等待机械动作...")
+
+            # 4. 更新仿真器与UI状态
+            if self.ui.simulator_enable_checkbox.isChecked():
+                # 防止 NumPy 报错的判断
+                current_z = self.simulator_window.current_sliders_z
+                start_sliders = current_z if current_z is not None else [-300, -300, -300]
                 
-                if success:
-                    # 等待回零完成（简单延迟，实际应该监听状态话题）
-                    import time
-                    time.sleep(2)
+                # 目标位置：假设最终回到安全高度
+                final_sliders_target = [-37.609, -37.609, -37.609] 
+
+                self.log_terminal("正在同步UI与仿真视图...")
+                
+                # 简单的插值动画
+                steps = 20
+                for i in range(steps):
+                    t = (i + 1) / steps
+                    temp_sliders = [
+                        float(start + (end - start) * t)
+                        for start, end in zip(start_sliders, final_sliders_target)
+                    ]
                     
-                    # 更新仿真器状态（显示回零过程）
-                    if self.ui.simulator_enable_checkbox.isChecked():
-                        # 模拟回零动画：从当前位置向上移动
-                        for i in range(10):
-                            pos = [-337 + (i * 3), -337 + (i * 3), -337 + (i * 3)]
-                            self.simulator_window.update_by_sliders(pos)
-                            QApplication.processEvents()
-                            time.sleep(0.1)
+                    # 1. 更新仿真器画面
+                    self.simulator_window.update_by_sliders(temp_sliders)
+                    
+                    # 2. 【新增】更新UI界面的滑块数值显示
+                    self.update_ui_sliders(temp_sliders[0], temp_sliders[1], temp_sliders[2])
+                    platform_pos = self.kinematics.forward_kinematics(temp_sliders)
+                    self.update_ui_coords(platform_pos)
+                    QApplication.processEvents()
+                    time.sleep(0.05)
+
+                # 确保最后一次更新精准到位
+                self.update_ui_sliders(final_sliders_target[0], final_sliders_target[1], final_sliders_target[2])
+
+                # # 5. 最终动平台位置计算与同步
+                # platform_pos = self.kinematics.forward_kinematics(final_sliders_target)  # 一次到位 ui界面不会实时更新
+                
+                if platform_pos is not None:
+                    # 更新动平台坐标显示 (XYZ)
+                    self.update_ui_coords(platform_pos)
+                    
+                    # 更新内部状态
+                    self.current_robot_pos = list(platform_pos)
+                    if hasattr(self, 'inch_move_module'):
+                        self.inch_move_module.update_current_position(self.current_robot_pos)
                         
-                        # 最终位置
-                        final_sliders = [-300, -300, -300]
-                        self.simulator_window.update_by_sliders(final_sliders)
-                        
-                        # 计算并显示动平台位置
-                        platform_pos = self.kinematics.forward_kinematics(final_sliders)
-                        if platform_pos:
-                            self.update_ui_and_simulator(platform_pos, final_sliders)
+                    self.log_terminal(f"系统状态已重置")
                 else:
-                    all_success = False
-                    self.log_terminal(f"轴{axis_idx+1}回零失败")
-            
-            if all_success:
-                self.log_terminal("所有轴回零完成！机器人已复位到安全位置")
-            else:
-                self.log_terminal("部分轴回零失败，请检查硬件连接")
-            
+                    self.log_terminal("警告: 回零后位置无法求得正解")
+
             self._reset_button_state()
+            self.log_terminal("=== 回零流程结束 ===")
             
         except Exception as e:
-            self.log_terminal(f"回零序列执行失败: {str(e)}")
+            self.log_terminal(f"回零执行异常: {str(e)}")
+            traceback.print_exc()
             self._reset_button_state()
 
     def _execute_simulation_reset(self, reset_pos, reset_sliders):
@@ -944,15 +1057,24 @@ class MainWindow(QMainWindow):
             if hasattr(self.ui, 'comboBox'):
                 self.ui.comboBox.addItems(["门型曲线", "花朵", "Lame曲线", "螺旋线"])
                 self.ui.comboBox.setCurrentText("门型曲线")
-            
+                ############################################写字
+            if hasattr(self.ui, 'comboBox'):
+                self.ui.input_method.addItems(["文本输入", "手写输入"])
+                self.ui.input_method.setCurrentText("手写输入")
+
+        
             # 初始化轨迹曲线生成器
-            self.trajectory_curves = TrajectoryCurves(self.kinematics)
-            
+            # 初始化轨迹曲线生成器
+            self.trajectory_curves = TrajectoryCurves(
+                kinematics=self.kinematics,
+                mqtt_handler=self.mqtt_handler,      # 传入 mqtt
+                simulator_window=self.simulator_window # 传入 仿真器
+            )            
             # 连接信号
             self.trajectory_curves.trajectory_generated.connect(self.on_trajectory_generated)
             self.trajectory_curves.execution_progress.connect(self.on_execution_progress)
             self.trajectory_curves.execution_completed.connect(self.on_execution_completed)
-            self.trajectory_curves.log_message.connect(self.log_terminal)
+            self.trajectory_curves.log_signal.connect(self.log_terminal)
             
             # 连接UI信号
             if hasattr(self.ui, 'pushButton_6'):
@@ -966,6 +1088,10 @@ class MainWindow(QMainWindow):
             
             if hasattr(self.ui, 'visualization_checkbox'):
                 self.ui.visualization_checkbox.clicked.connect(self.visualize_selected_curve)
+
+            self.trajectory_curves.ui_update_signal.connect(
+            lambda pos, sliders: self.update_ui_and_simulator(pos, sliders, update_simulator=True)
+            )
             
             print("轨迹曲线UI初始化完成")
             
@@ -1035,50 +1161,58 @@ class MainWindow(QMainWindow):
             return {}
 
     def execute_selected_curve(self):
-        """执行选中的轨迹曲线"""
+        """执行选中的轨迹曲线（带过渡）"""
         try:
             if not self.trajectory_curves.current_trajectory:
                 self.log_terminal("错误: 请先生成轨迹")
                 return
             
             # 获取速度因子
-            speed_factor = getattr(self.ui, 'v', 1.0)
-            if hasattr(speed_factor, 'value'):
-                speed_factor = speed_factor.value() / 100.0
+            speed_factor = 0.5
+            if hasattr(self.ui, 'v'):
+                speed_factor = self.ui.v.value() / 100.0
             
-            # 开始执行轨迹
-            success = self.trajectory_curves.start_execution(
-                self.mqtt_handler,
-                self.simulator_window,
-                self._update_curve_execution_ui,
-                speed_factor
+            # 获取当前位置
+            current_pos = self.current_robot_pos
+            
+            # 检查仿真器是否启用
+            simulator_enabled = self.ui.simulator_enable_checkbox.isChecked()
+            
+            # 使用带过渡的执行方法
+            success = self.trajectory_curves.start_execution_with_transition(
+                mqtt_handler=self.mqtt_handler,
+                simulator_window=self.simulator_window if simulator_enabled else None,
+                current_pos=current_pos,
+                speed_factor=speed_factor
             )
             
             if success:
-                # 更新UI状态
+                self.log_terminal("轨迹执行已开始（包含过渡段）")
+                # 更新UI按钮状态
                 if hasattr(self.ui, 'pushButton_6'):
                     self.ui.pushButton_6.setEnabled(False)
                 if hasattr(self.ui, 'pushButton_2'):
                     self.ui.pushButton_2.setEnabled(True)
-            
+            else:
+                self.log_terminal("轨迹执行失败")
+                
         except Exception as e:
             self.log_terminal(f"执行轨迹失败: {str(e)}")
+            import traceback
+            traceback.print_exc()
 
     def stop_curve_execution(self):
-        """停止轨迹执行"""
+        """停止轨迹执行（简化版）"""
         try:
-            self.trajectory_curves.stop_execution()
-            
-            # 恢复UI状态
-            if hasattr(self.ui, 'pushButton_6'):
-                self.ui.pushButton_6.setEnabled(True)
-            if hasattr(self.ui, 'pushButton_2'):
-                self.ui.pushButton_2.setEnabled(False)
+            # 只停止轨迹执行，不修改按钮状态（由急停统一管理）
+            if hasattr(self, 'trajectory_curves'):
+                self.trajectory_curves.stop_execution()
             
             self.log_terminal("轨迹执行已停止")
             
         except Exception as e:
             self.log_terminal(f"停止轨迹失败: {str(e)}")
+            
 
     def visualize_selected_curve(self):
         """可视化选中的轨迹曲线"""
@@ -1162,7 +1296,7 @@ class MainWindow(QMainWindow):
             )
             
             # 连接信号
-            self.p2p_move_module.log_signal.connect(self.log_terminal)
+            # self.p2p_move_module.log_signal.connect(self.log_terminal)
             self.p2p_move_module.ui_update_signal.connect(self.handle_p2p_ui_update)
             self.p2p_move_module.simulator_update_signal.connect(self.handle_p2p_simulator_update)
             self.p2p_move_module.execution_progress.connect(self.handle_p2p_progress)
@@ -1185,7 +1319,7 @@ class MainWindow(QMainWindow):
             )
             
             # 连接信号
-            self.trajectory_curves_module.log_signal.connect(self.log_terminal)
+            # self.trajectory_curves_module.log_signal.connect(self.log_terminal)
             self.trajectory_curves_module.ui_update_signal.connect(self.handle_trajectory_ui_update)
             self.trajectory_curves_module.simulator_update_signal.connect(self.handle_trajectory_simulator_update)
             self.trajectory_curves_module.execution_progress.connect(self.handle_trajectory_progress)
@@ -1370,7 +1504,7 @@ class MainWindow(QMainWindow):
             # self.ui.writing_canvas = self.writing_canvas
             # self.writing_func.writing_canvas = self.writing_canvas
             # 设置默认值
-            self.ui.z_height.setValue(-280.0)
+            # self.ui.z_height.setValue(-280.0)
             self.ui.writing_area.setValue(200)
             print("写字画布初始化完成")
         except Exception as e:

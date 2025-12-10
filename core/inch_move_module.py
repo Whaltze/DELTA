@@ -182,21 +182,21 @@ class InchMoveModule(QObject):
             traceback.print_exc()
             return False
     
-    def move_inch(self, axis_idx, delta, simulator_enabled=False, speed=None):
-        """
-        执行寸动（兼容旧接口，使用微小点动）
+    # def move_inch(self, axis_idx, delta, simulator_enabled=False, speed=None):
+    #     """
+    #     执行寸动（兼容旧接口，使用微小点动）
         
-        参数:
-        axis_idx (int): 轴索引 (0:X, 1:Y, 2:Z)
-        delta (float): 移动距离 (mm)
-        simulator_enabled (bool): 是否启用仿真器
-        speed (float): 移动速度 (可选)
+    #     参数:
+    #     axis_idx (int): 轴索引 (0:X, 1:Y, 2:Z)
+    #     delta (float): 移动距离 (mm)
+    #     simulator_enabled (bool): 是否启用仿真器
+    #     speed (float): 移动速度 (可选)
         
-        返回:
-        bool: 操作是否成功
-        """
-        # 调用微小点动函数
-        return self.move_micro_inch(axis_idx, delta, simulator_enabled, speed, validate_only=False)
+    #     返回:
+    #     bool: 操作是否成功
+    #     """
+    #     # 调用微小点动函数
+    #     return self.move_micro_inch(axis_idx, delta, simulator_enabled, speed, validate_only=False)
     
     def move_to_position(self, x, y, z, simulator_enabled=False, speed=None):
         """
@@ -338,18 +338,26 @@ class InchMoveModule(QObject):
         self.slider_limits['min'] = float(min_limit)
         self.slider_limits['max'] = float(max_limit)
         self.log_signal.emit(f"滑块限位设置: {min_limit:.1f} ~ {max_limit:.1f} mm")
-    
-    def emergency_stop(self):
+
+    def emergency_stop(self, stop_state=True):
         """
         急停功能
         """
         try:
-            self.log_signal.emit("寸动模块执行急停")
+            # self.log_signal.emit("寸动模块执行急停")
             
             # 使用MQTT处理器的急停功能
-            if self.mqtt_handler.is_connected:
-                self.mqtt_handler.emergency_stop()
-            
+            if self.mqtt_handler and self.mqtt_handler.is_connected:
+                self.mqtt_handler.send_emergency_stop(stop_state)
+
+            if stop_state:
+                # 停止所有本地定时器/动画
+                if hasattr(self, 'animation_timer'):
+                    self.animation_timer.stop()
+                self.log_signal.emit("寸动模块急停激活")
+            else:
+                self.log_signal.emit("寸动模块急停解除")
+                
             return True
             
         except Exception as e:

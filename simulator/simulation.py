@@ -8,6 +8,7 @@ from PySide6.QtCore import Signal
 
 class DeltaSimulator(QWidget):
     pose_changed = Signal(list, list) 
+    log_signal = Signal(str)   
     def __init__(self, kinematics, parent=None):
         super().__init__(parent)
         self.kinematics = kinematics
@@ -233,10 +234,26 @@ class DeltaSimulator(QWidget):
         self.detected_obj_items.clear()
 
     # ================== 运动更新 ==================
-    def set_emergency_state(self, is_emergency):
-        """设置急停状态"""
-        color = self.COLOR_ALARM if is_emergency else self.COLOR_PLATFORM
-        self.platform_item.setData(color=color)
+    def set_emergency_state(self, emergency):
+        """
+        设置急停状态
+        
+        参数:
+        emergency (bool): True=急停，False=解除急停
+        """
+        self.emergency_state = emergency
+        
+        if emergency:
+            # 急停时的视觉反馈（变红）
+            self.platform_item.setData(color=self.COLOR_ALARM)
+            self.log_signal.emit("仿真器：急停状态激活")
+        else:
+            # 解除急停时恢复正常颜色
+            self.platform_item.setData(color=self.COLOR_PLATFORM)
+            self.log_signal.emit("仿真器：急停解除")
+        
+        self.update()  # 触发重绘
+
 
     def update_robot_state(self, pos, redraw=True):
         """通过末端坐标更新"""

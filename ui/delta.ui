@@ -217,7 +217,7 @@
      <rect>
       <x>15</x>
       <y>110</y>
-      <width>291</width>
+      <width>281</width>
       <height>211</height>
      </rect>
     </property>
@@ -1610,10 +1610,10 @@
      <set>Qt::AlignCenter</set>
     </property>
     <property name="minimum">
-     <double>-610.000000000000000</double>
+     <double>-9999999.000000000000000</double>
     </property>
     <property name="maximum">
-     <double>-410.000000000000000</double>
+     <double>9999999.000000000000000</double>
     </property>
     <property name="singleStep">
      <double>5.000000000000000</double>

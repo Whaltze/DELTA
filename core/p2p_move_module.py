@@ -57,7 +57,7 @@ class P2PMoveModule(QObject):
         self.animation_interval = 50  # 动画更新间隔 (ms)
         
         # 默认参数
-        self.default_speed = 50.0  # 默认速度 (mm/s)
+        self.default_speed = 10.0  # 默认速度 (mm/s)
         
         # 工作空间限位 (单位：mm)
         self.workspace_limits = {
@@ -574,33 +574,27 @@ class P2PMoveModule(QObject):
         self.slider_limits['min'] = float(min_limit)
         self.slider_limits['max'] = float(max_limit)
         self.log_signal.emit(f"滑块限位设置: {min_limit:.1f} ~ {max_limit:.1f} mm")
-    
-    def emergency_stop(self):
+
+    def emergency_stop(self, stop_state=True):
         """
         急停功能
         """
         try:
             self.stop_animation()
-            self.log_signal.emit("P2P模块执行急停")
+            # self.log_signal.emit("P2P模块执行急停")
             
-            # 构造急停消息
-            emergency_data = {
-                "header": {
-                    "stamp": time.time(),
-                    "frame_id": "emergency_stop"
-                },
-                "command": "emergency_stop",
-                "priority": 255,
-                "source": "p2p_move_module"
-            }
-            
-            # 发送急停指令
-            if self.mqtt_handler.is_connected:
-                json_str = json.dumps(emergency_data, indent=2)
-                self.mqtt_handler.client.publish(self.TOPIC_ROBOT_COMMAND, json_str, qos=2)
-                self._log_ros_message(self.TOPIC_ROBOT_COMMAND, emergency_data)
-            
-            return True
+            if self.mqtt_handler and self.mqtt_handler.is_connected:
+                # 调用修改后的MQTT急停函数
+                self.mqtt_handler.send_emergency_stop(stop_state)
+                
+            if stop_state:
+                # 停止所有本地定时器/动画
+                if hasattr(self, 'animation_timer'):
+                    self.animation_timer.stop()
+                self.log_signal.emit("P2P模块急停激活")
+            else:
+                self.log_signal.emit("P2P模块急停解除")
+
             
         except Exception as e:
             self.log_signal.emit(f"P2P急停失败: {str(e)}")

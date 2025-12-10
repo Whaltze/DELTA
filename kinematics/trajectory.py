@@ -23,7 +23,7 @@ class TrajectoryPlanner:
     参考BezierTrack类实现贝塞尔曲线轨迹规划。
     """
 
-    def __init__(self, acc=100, max_speed=1000, interval=0.1, h=10, b=30, d=60):
+    def __init__(self, acc=100, max_speed=10, interval=0.1, h=10, b=30, d=60):
         """
         初始化轨迹规划器。
 
@@ -71,7 +71,8 @@ class TrajectoryPlanner:
         """
         start_pos = np.array(start_pos)
         end_pos = np.array(end_pos)
-        
+        num_points = int(num_points) # 确保是整形
+
         # 使用np.linspace在每个维度上生成均匀分布的点
         x_points = np.linspace(start_pos[0], end_pos[0], num_points)
         y_points = np.linspace(start_pos[1], end_pos[1], num_points)

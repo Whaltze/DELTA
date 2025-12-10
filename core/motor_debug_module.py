@@ -254,34 +254,25 @@ class MotorDebugModule(QObject):
             'z_max': float(z_max)
         }
         self.log_signal.emit(f"工作空间限位设置: X[{x_min:.1f}, {x_max:.1f}], Y[{y_min:.1f}, {y_max:.1f}], Z[{z_min:.1f}, {z_max:.1f}]")
-    
-    def emergency_stop(self):
+
+    def emergency_stop(self, stop_state=True):
         """
         急停功能
         """
         try:
-            self.log_signal.emit("电机调试模块执行急停")
+            # self.log_signal.emit("电机调试模块执行急停")
             
-            # 构造ROS风格的急停消息
-            emergency_data = {
-                "header": {
-                    "stamp": time.time(),
-                    "frame_id": "emergency_stop"
-                },
-                "command": "emergency_stop",
-                "priority": 255,  # 最高优先级
-                "source": "motor_debug_module"
-            }
-            
-            # 发送急停指令到 card/0/motor/in/command 话题
-            if self.mqtt_handler.is_connected:
-                json_str = json.dumps(emergency_data, indent=2)
-                self.mqtt_handler.client.publish(self.TOPIC_MOTOR_COMMAND, json_str, qos=2)
-                
-                # 按ROS话题格式竖向显示消息
-                self._log_ros_message(self.TOPIC_MOTOR_COMMAND, emergency_data)
-            
-            return True
+            if self.mqtt_handler and self.mqtt_handler.is_connected:
+                    # 调用修改后的MQTT急停函数
+                    self.mqtt_handler.send_emergency_stop(stop_state)
+                    
+            if stop_state:
+                # 停止所有本地定时器/动画
+                if hasattr(self, 'animation_timer'):
+                    self.animation_timer.stop()
+                self.log_signal.emit("电机调试模块急停激活")
+            else:
+                self.log_signal.emit("电机调试模块急停解除")
             
         except Exception as e:
             self.log_signal.emit(f"电机调试急停失败: {str(e)}")

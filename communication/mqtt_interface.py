@@ -11,7 +11,7 @@ class DeltaMqttHandler(QObject):
     log_signal = Signal(str)
     connection_state_changed = Signal(bool)
 
-    def __init__(self, broker_ip="192.168.217.99", port=1883, client_id="Delta_Ubuntu_Master", imcid=0):
+    def __init__(self, broker_ip="192.168.29.99", port=1883, client_id="Delta_Ubuntu_Master", imcid=0):
         super().__init__()
         self.broker_ip = broker_ip
         self.port = port
@@ -39,6 +39,9 @@ class DeltaMqttHandler(QObject):
 
         self.TOPIC_SLIDER_VEL = f"card/{self.imcid}/slider/control/vel"
         self.TOPIC_SLIDER_POSITION = f"card/{self.imcid}/slider/control/position"
+
+        # 【新增】曲线轨迹控制话题
+        self.TOPIC_CURVE_TRAJECTORY = f"card/{self.imcid}/position/control/curve"
 
         # 机械参数 (脉冲/毫米)
         self.PULSE_PER_MM = 100  
@@ -255,6 +258,45 @@ class DeltaMqttHandler(QObject):
         except Exception as e:
             self.log_signal.emit(f"轴{axis}回零指令发送失败: {str(e)}")
             return False
+        # 【新增】发送曲线轨迹方法
+
+# ================== 【新增】曲线轨迹发送方法 ==================
+    def send_curve_trajectory(self, trajectory_points, max_vel=100.0):
+        """
+        一次性发送整条轨迹的插补点列表
+        
+        参数:
+        trajectory_points (list): 包含 [x, y, z] 的列表
+        max_vel (float): 轨迹最大合成速度
+        """
+        if not self.is_connected:
+            self.log_signal.emit("未连接到MQTT Broker，无法发送曲线轨迹")
+            return False
+        
+        # 构造符合要求的 JSON 格式
+        points_list = []
+        for p in trajectory_points:
+            points_list.append({
+                "x": float(p[0]),
+                "y": float(p[1]),
+                "z": float(p[2])
+            })
+            
+        payload = {
+            "points": points_list,
+            "max_vel": float(max_vel)
+        }
+        
+        try:
+            # 发送大包数据，建议稍微增加 keepalive 或者确保网络稳定
+            json_str = json.dumps(payload)
+            self.client.publish(self.TOPIC_CURVE_TRAJECTORY, json_str, qos=1)
+            
+            self.log_signal.emit(f"已发送曲线轨迹: 共 {len(points_list)} 个插补点, 速度 {max_vel} mm/s")
+            return True
+        except Exception as e:
+            self.log_signal.emit(f"发送曲线轨迹失败: {str(e)}")
+            return False
         
     def _log_message(self, topic, data):
         """统一日志格式"""
@@ -327,14 +369,27 @@ class DeltaMqttHandler(QObject):
         except Exception as e:
             self.log_signal.emit(f"格式化P2P消息失败: {str(e)}")
 
-    def send_emergency_stop(self):
-        """发送急停指令"""
-        payload = {"stop": True}
+    def send_emergency_stop(self, stop_state=True):
+        """
+        发送急停/解除急停指令
+        
+        参数:
+        stop_state (bool): True=急停, False=解除急停
+        """
+        payload = {"stop": bool(stop_state)}
         try:
             self.client.publish(self.TOPIC_EMERGENCY_STOP, json.dumps(payload), qos=2)
-            self.log_signal.emit("急停指令已发送")
+            state_str = "急停" if stop_state else "解除急停"
+            self.log_signal.emit(f"{state_str}指令已发送")
+            return True
         except Exception as e:
-            self.log_signal.emit(f"急停指令发送失败: {str(e)}")
+            state_str = "急停" if stop_state else "解除急停"
+            self.log_signal.emit(f"{state_str}指令发送失败: {str(e)}")
+            return False
+
+    def emergency_stop(self, stop_state=True):
+        """急停指令（兼容现有调用）"""
+        return self.send_emergency_stop(stop_state)
 
     def move_to_xyz(self, x, y, z, wait=False):
         """发送XYZ移动指令"""
@@ -364,10 +419,6 @@ class DeltaMqttHandler(QObject):
             self._log_message("IO状态", data)
         except Exception as e:
             self.log_signal.emit(f"IO状态解析错误: {str(e)}")
-
-    def emergency_stop(self):
-        """急停指令"""
-        self.send_emergency_stop()
 
     # 添加状态更新方法
     def update_status(self, sliders_z, end_pos):
